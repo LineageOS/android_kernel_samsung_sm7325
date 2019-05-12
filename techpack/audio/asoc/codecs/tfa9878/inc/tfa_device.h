@@ -399,4 +399,6 @@ enum tfa98xx_error ipi_tfadsp_read(struct tfa_device *tfa,
 	int length, unsigned char *bytes);
 #endif
 
+enum tfa_error tfa98xxTotfa(enum tfa98xx_error err);
+
 #endif /* __TFA_DEVICE_H__ */

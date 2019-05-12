@@ -1620,7 +1620,7 @@ static int tfa98xx_run_calibration(struct tfa98xx *tfa98xx0)
 
 #if defined(TFA_READ_REFERENCE_TEMP)
 	/* EXT_TEMP */
-	ret = tfa98xx_read_reference_temp(&temp_val);
+	ret = tfa98xxTotfa(tfa98xx_read_reference_temp(&temp_val));
 	if (ret) {
 		pr_err("%s: error in reading reference temp\n",
 			__func__);
