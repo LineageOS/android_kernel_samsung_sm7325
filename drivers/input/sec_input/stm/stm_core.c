@@ -1826,9 +1826,9 @@ static void stm_ts_status_event(struct stm_ts_data *ts, u8 *event_buff)
 		if (ts->plat_data->support_ear_detect) {
 			if (p_event_status->status_id == 0x6A) {
 				ts->hover_event = p_event_status->status_data_1;
-				input_report_abs(ts->plat_data->input_dev_proximity, ABS_MT_CUSTOM, p_event_status->status_data_1);
+				input_report_abs(ts->plat_data->input_dev_proximity, ABS_MT_CUSTOM, !p_event_status->status_data_1);
 				input_sync(ts->plat_data->input_dev_proximity);
-				input_info(true, &ts->client->dev, "%s: proximity: %d\n", __func__, p_event_status->status_data_1);
+				input_info(true, &ts->client->dev, "%s: proximity: %d\n", __func__, !p_event_status->status_data_1);
 			}
 		}
 	}
