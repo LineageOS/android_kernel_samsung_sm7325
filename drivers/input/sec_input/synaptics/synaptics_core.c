@@ -194,14 +194,24 @@ static void secure_touch_stop(struct synaptics_ts_data *ts, bool stop)
 	}
 }
 
+static ssize_t fod_pressed_show(struct device *dev,
+		struct device_attribute *attr, char *buf)
+{
+	struct synaptics_ts_data *ts = dev_get_drvdata(dev);
+
+	return snprintf(buf, PAGE_SIZE, "%u\n", ts->fod_pressed);
+}
+
 static DEVICE_ATTR(secure_touch_enable, (S_IRUGO | S_IWUSR | S_IWGRP),
 		secure_touch_enable_show, secure_touch_enable_store);
 static DEVICE_ATTR(secure_touch, S_IRUGO, secure_touch_show, NULL);
 static DEVICE_ATTR(secure_ownership, S_IRUGO, secure_ownership_show, NULL);
+static DEVICE_ATTR(fod_pressed, S_IRUGO, fod_pressed_show, NULL);
 static struct attribute *secure_attr[] = {
 	&dev_attr_secure_touch_enable.attr,
 	&dev_attr_secure_touch.attr,
 	&dev_attr_secure_ownership.attr,
+	&dev_attr_fod_pressed.attr,
 	NULL,
 };
 

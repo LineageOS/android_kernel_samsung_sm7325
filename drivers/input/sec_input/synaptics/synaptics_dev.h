@@ -775,6 +775,7 @@ struct synaptics_ts_data {
 	int (*write_immediate_message)(struct synaptics_ts_data *ts,
 		unsigned char command, unsigned char *payload,
 		unsigned int payload_len);
+	bool fod_pressed;
 };
 
 //temporily
