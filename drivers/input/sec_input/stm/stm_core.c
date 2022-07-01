@@ -1825,10 +1825,11 @@ static void stm_ts_status_event(struct stm_ts_data *ts, u8 *event_buff)
 	} else if (p_event_status->stype == STM_TS_EVENT_STATUSTYPE_VENDORINFO) {
 		if (ts->plat_data->support_ear_detect) {
 			if (p_event_status->status_id == 0x6A) {
+				p_event_status->status_data_1 = p_event_status->status_data_1 == 5 || !p_event_status->status_data_1;
 				ts->hover_event = p_event_status->status_data_1;
-				input_report_abs(ts->plat_data->input_dev_proximity, ABS_MT_CUSTOM, !p_event_status->status_data_1);
+				input_report_abs(ts->plat_data->input_dev_proximity, ABS_MT_CUSTOM, p_event_status->status_data_1);
 				input_sync(ts->plat_data->input_dev_proximity);
-				input_info(true, &ts->client->dev, "%s: proximity: %d\n", __func__, !p_event_status->status_data_1);
+				input_info(true, &ts->client->dev, "%s: proximity: %d\n", __func__, p_event_status->status_data_1);
 			}
 		}
 	}
