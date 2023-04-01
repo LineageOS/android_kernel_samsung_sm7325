@@ -594,7 +594,6 @@ struct smb_charger {
 	bool			apsd_ext_timeout;
 	bool			qc3p5_detected;
 	int			qc3p5_detected_mw;
-	bool			disable_suspend_on_collapse;
 
 	/* workaround flag */
 	int		real_charger_type;

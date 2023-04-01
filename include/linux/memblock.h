@@ -351,8 +351,8 @@ phys_addr_t memblock_phys_alloc_range(phys_addr_t size, phys_addr_t align,
 				      phys_addr_t start, phys_addr_t end);
 phys_addr_t memblock_phys_alloc_try_nid(phys_addr_t size, phys_addr_t align, int nid);
 
-static __always_inline phys_addr_t memblock_phys_alloc(phys_addr_t size,
-						       phys_addr_t align)
+static inline phys_addr_t memblock_phys_alloc(phys_addr_t size,
+					      phys_addr_t align)
 {
 	return memblock_phys_alloc_range(size, align, 0,
 					 MEMBLOCK_ALLOC_ACCESSIBLE);
@@ -571,6 +571,28 @@ extern void early_memtest(phys_addr_t start, phys_addr_t end);
 static inline void early_memtest(phys_addr_t start, phys_addr_t end)
 {
 }
+#endif
+
+#ifdef CONFIG_MEMBLOCK_MEMSIZE
+extern void memblock_memsize_record(const char *name, phys_addr_t base,
+				    phys_addr_t size, bool nomap,
+				    bool reusable);
+extern void memblock_memsize_detect_hole(void);
+extern void memblock_memsize_set_name(const char *name);
+extern void memblock_memsize_unset_name(void);
+extern void memblock_memsize_enable_tracking(void);
+extern void memblock_memsize_disable_tracking(void);
+extern void memblock_memsize_mod_kernel_size(long size);
+#else
+static inline void memblock_memsize_record(const char *name, phys_addr_t base,
+				    phys_addr_t size, bool nomap,
+				    bool reusable) { }
+static inline void memblock_memsize_detect_hole(void) { }
+static inline void memblock_memsize_set_name(const char *name) { }
+static inline void memblock_memsize_unset_name(void) { }
+static inline void memblock_memsize_enable_tracking(void){ }
+static inline void memblock_memsize_disable_tracking(void){ }
+static inline void memblock_memsize_mod_kernel_size(long size) { }
 #endif
 
 #endif /* __KERNEL__ */

@@ -877,6 +877,11 @@ config MEMCG_SWAP_ENABLED
 	  select this option (if, for some reason, they need to disable it
 	  then swapaccount=0 does the trick).
 
+config MEMCG_FORCE_USE_VM_SWAPPINESS
+	bool "Force to use vm_swappiness instead of memcg->swappiness"
+	depends on MEMCG_SWAP
+	default y
+
 config MEMCG_KMEM
 	bool
 	depends on MEMCG && !SLOB
@@ -1654,16 +1659,6 @@ config BPF_JIT_ALWAYS_ON
 	help
 	  Enables BPF JIT and removes BPF interpreter to avoid
 	  speculative execution of BPF instructions by the interpreter
-
-config BPF_UNPRIV_DEFAULT_OFF
-	bool "Disable unprivileged BPF by default"
-	depends on BPF_SYSCALL
-	help
-	  Disables unprivileged BPF by default by setting the corresponding
-	  /proc/sys/kernel/unprivileged_bpf_disabled knob to 2. An admin can
-	  still reenable it by setting it to 0 later on, or permanently
-	  disable it by setting it to 1 (from which no other transition to
-	  0 is possible anymore).
 
 config USERFAULTFD
 	bool "Enable userfaultfd() system call"

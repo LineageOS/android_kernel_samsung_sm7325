@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 /*
  * Copyright (c) 2018-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  */
 
 #include <linux/device.h>
@@ -1355,15 +1354,12 @@ static void smblib_uusb_removal(struct smb_charger *chg)
 			smblib_err(chg, "Couldn't restore max pulses rc=%d\n",
 					rc);
 
-		if (!chg->disable_suspend_on_collapse) {
-			rc = smblib_masked_write(chg, USBIN_AICL_OPTIONS_CFG_REG,
-						 SUSPEND_ON_COLLAPSE_USBIN_BIT,
-						 SUSPEND_ON_COLLAPSE_USBIN_BIT);
-			if (rc < 0)
-				smblib_err(chg,
-					"Couldn't turn on SUSPEND_ON_COLLAPSE_USBIN_BIT rc=%d\n",
+		rc = smblib_masked_write(chg, USBIN_AICL_OPTIONS_CFG_REG,
+				SUSPEND_ON_COLLAPSE_USBIN_BIT,
+				SUSPEND_ON_COLLAPSE_USBIN_BIT);
+		if (rc < 0)
+			smblib_err(chg, "Couldn't turn on SUSPEND_ON_COLLAPSE_USBIN_BIT rc=%d\n",
 					rc);
-		}
 
 		chg->qc2_unsupported_voltage = QC2_COMPLIANT;
 	}
@@ -6462,15 +6458,12 @@ static void typec_src_removal(struct smb_charger *chg)
 			smblib_err(chg, "Couldn't restore max pulses rc=%d\n",
 					rc);
 
-		if (!chg->disable_suspend_on_collapse) {
-			rc = smblib_masked_write(chg, USBIN_AICL_OPTIONS_CFG_REG,
-						 SUSPEND_ON_COLLAPSE_USBIN_BIT,
-						 SUSPEND_ON_COLLAPSE_USBIN_BIT);
-			if (rc < 0)
-				smblib_err(chg,
-					"Couldn't turn on SUSPEND_ON_COLLAPSE_USBIN_BIT rc=%d\n",
+		rc = smblib_masked_write(chg, USBIN_AICL_OPTIONS_CFG_REG,
+				SUSPEND_ON_COLLAPSE_USBIN_BIT,
+				SUSPEND_ON_COLLAPSE_USBIN_BIT);
+		if (rc < 0)
+			smblib_err(chg, "Couldn't turn on SUSPEND_ON_COLLAPSE_USBIN_BIT rc=%d\n",
 					rc);
-		}
 
 		chg->qc2_unsupported_voltage = QC2_COMPLIANT;
 	}
@@ -8048,9 +8041,6 @@ static void smblib_lpd_ra_open_work(struct work_struct *work)
 	if (!(stat & TYPEC_WATER_DETECTION_STATUS_BIT)
 			|| (stat & TYPEC_TCCDEBOUNCE_DONE_STATUS_BIT)) {
 		chg->lpd_stage = LPD_STAGE_NONE;
-
-		/* Remove LPD_VOTER from ICL is moisture status is gone in attached state. */
-		vote(chg->usb_icl_votable, LPD_VOTER, false, 0);
 		goto out;
 	}
 

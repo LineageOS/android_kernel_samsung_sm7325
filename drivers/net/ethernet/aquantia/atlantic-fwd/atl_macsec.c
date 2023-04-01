@@ -12,7 +12,6 @@
 #include "atl_macsec.h"
 #if IS_ENABLED(CONFIG_MACSEC) && defined(NETIF_F_HW_MACSEC)
 #include "atl_common.h"
-#include "atl_fwd.h"
 #include <linux/rtnetlink.h>
 
 #include "macsec/macsec_api.h"

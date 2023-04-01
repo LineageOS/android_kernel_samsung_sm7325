@@ -31,14 +31,8 @@
 #include <linux/if_tunnel.h>
 #include <net/dst.h>
 #include <net/flow.h>
-#ifndef __GENKSYMS__
-#include <net/inet_ecn.h>
-#endif
 #include <net/xfrm.h>
 #include <net/ip.h>
-#ifndef __GENKSYMS__
-#include <net/gre.h>
-#endif
 #if IS_ENABLED(CONFIG_IPV6_MIP6)
 #include <net/mip6.h>
 #endif
@@ -3287,7 +3281,7 @@ decode_session4(struct sk_buff *skb, struct flowi *fl, bool reverse)
 	fl4->flowi4_proto = iph->protocol;
 	fl4->daddr = reverse ? iph->saddr : iph->daddr;
 	fl4->saddr = reverse ? iph->daddr : iph->saddr;
-	fl4->flowi4_tos = iph->tos & ~INET_ECN_MASK;
+	fl4->flowi4_tos = iph->tos;
 
 	if (!ip_is_fragment(iph)) {
 		switch (iph->protocol) {
@@ -3449,26 +3443,6 @@ decode_session6(struct sk_buff *skb, struct flowi *fl, bool reverse)
 			}
 			fl6->flowi6_proto = nexthdr;
 			return;
-		case IPPROTO_GRE:
-			if (!onlyproto &&
-			    (nh + offset + 12 < skb->data ||
-			     pskb_may_pull(skb, nh + offset + 12 - skb->data))) {
-				struct gre_base_hdr *gre_hdr;
-				__be32 *gre_key;
-
-				nh = skb_network_header(skb);
-				gre_hdr = (struct gre_base_hdr *)(nh + offset);
-				gre_key = (__be32 *)(gre_hdr + 1);
-
-				if (gre_hdr->flags & GRE_KEY) {
-					if (gre_hdr->flags & GRE_CSUM)
-						gre_key++;
-					fl6->fl6_gre_key = *gre_key;
-				}
-			}
-			fl6->flowi6_proto = nexthdr;
-			return;
-
 #if IS_ENABLED(CONFIG_IPV6_MIP6)
 		case IPPROTO_MH:
 			offset += ipv6_optlen(exthdr);
@@ -4187,7 +4161,8 @@ void __init xfrm_init(void)
 	synchronize_rcu();
 }
 
-#ifdef CONFIG_AUDITSYSCALL
+// [ SEC_SELINUX_PORTING_COMMON - remove AUDIT_MAC_IPSEC_EVENT audit log, it conflict with security notification
+#if 0 //#ifdef CONFIG_AUDITSYSCALL
 static void xfrm_audit_common_policyinfo(struct xfrm_policy *xp,
 					 struct audit_buffer *audit_buf)
 {
@@ -4251,6 +4226,8 @@ void xfrm_audit_policy_delete(struct xfrm_policy *xp, int result,
 }
 EXPORT_SYMBOL_GPL(xfrm_audit_policy_delete);
 #endif
+
+// ] SEC_SELINUX_PORTING_COMMON - remove AUDIT_MAC_IPSEC_EVENT audit log, it conflict with security notification
 
 #ifdef CONFIG_XFRM_MIGRATE
 static bool xfrm_migrate_selector_match(const struct xfrm_selector *sel_cmp,

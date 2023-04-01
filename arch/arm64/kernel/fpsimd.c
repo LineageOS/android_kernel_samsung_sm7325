@@ -41,6 +41,10 @@
 #include <asm/traps.h>
 #include <asm/virt.h>
 
+#if IS_ENABLED(CONFIG_KERNEL_MODE_NEON_DEBUG)
+#include <linux/sec_debug.h>
+#endif
+
 #define FPEXC_IOF	(1 << 0)
 #define FPEXC_DZF	(1 << 1)
 #define FPEXC_OFF	(1 << 2)
@@ -498,7 +502,7 @@ size_t sve_state_size(struct task_struct const *task)
 void sve_alloc(struct task_struct *task)
 {
 	if (task->thread.sve_state) {
-		memset(task->thread.sve_state, 0, sve_state_size(task));
+		memset(task->thread.sve_state, 0, sve_state_size(current));
 		return;
 	}
 
@@ -1001,6 +1005,11 @@ void fpsimd_thread_switch(struct task_struct *next)
 					&next->thread.uw.fpsimd_state;
 	wrong_cpu = next->thread.fpsimd_cpu != smp_processor_id();
 
+#if IS_ENABLED(CONFIG_KERNEL_MODE_NEON_DEBUG)		/* CONFIG_SEC_DEBUG */
+	if (IS_ENABLED(CONFIG_KERNEL_MODE_NEON_DEBUG))
+		if (!wrong_task && !wrong_cpu)
+			fpsimd_context_check(next);
+#endif
 	update_tsk_thread_flag(next, TIF_FOREIGN_FPSTATE,
 			       wrong_task || wrong_cpu);
 

@@ -382,7 +382,6 @@ retry_ipi:
 			continue;
 		}
 		if (get_cpu() == cpu) {
-			mask_ofl_test |= mask;
 			put_cpu();
 			continue;
 		}
@@ -739,7 +738,7 @@ static void sync_sched_exp_online_cleanup(int cpu)
 	my_cpu = get_cpu();
 	/* Quiescent state either not needed or already requested, leave. */
 	if (!(READ_ONCE(rnp->expmask) & rdp->grpmask) ||
-	    rdp->cpu_no_qs.b.exp) {
+	    __this_cpu_read(rcu_data.cpu_no_qs.b.exp)) {
 		put_cpu();
 		return;
 	}

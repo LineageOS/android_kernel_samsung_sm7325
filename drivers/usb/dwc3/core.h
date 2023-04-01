@@ -29,6 +29,11 @@
 #include <linux/ulpi/interface.h>
 
 #include <linux/phy/phy.h>
+#if IS_MODULE(CONFIG_BATTERY_SAMSUNG)
+#include <linux/battery/sec_battery_common.h>
+#elif defined(CONFIG_BATTERY_SAMSUNG)
+#include "../../battery/common/sec_charging_common.h"
+#endif
 
 #define DWC3_MSG_MAX	500
 
@@ -413,7 +418,6 @@
 #define DWC3_GUCTL2_RST_ACTBITLATER		BIT(14)
 
 /* Global User Control Register 3 */
-#define DWC3_GUCTL3_USB20_RETRY_DISABLE		BIT(16)
 #define DWC3_GUCTL3_SPLITDISABLE		BIT(14)
 
 /* Device Configuration Register */
@@ -865,6 +869,11 @@ enum gadget_state {
 	DWC3_GADGET_ACTIVE,
 };
 
+enum {
+	RELEASE	= 0,
+	NOTIFY	= 1,
+};
+
 /* TRB Length, PCM and Status */
 #define DWC3_TRB_SIZE_MASK	(0x00ffffff)
 #define DWC3_TRB_SIZE_LENGTH(n)	((n) & DWC3_TRB_SIZE_MASK)
@@ -1082,6 +1091,7 @@ struct dwc3_scratchpad_array {
  * @link_state: link state
  * @speed: device speed (super, high, full, low)
  * @hwparams: copy of hwparams registers
+ * @root: debugfs root folder pointer
  * @regset: debugfs pointer to regdump file
  * @dbg_lsp_select: current debug lsp mux register selection
  * @test_mode: true when we're entering a USB test mode
@@ -1307,6 +1317,7 @@ struct dwc3 {
 	u8			num_eps;
 
 	struct dwc3_hwparams	hwparams;
+	struct dentry		*root;
 	struct debugfs_regset32	*regset;
 
 	u32			dbg_lsp_select;
@@ -1319,7 +1330,6 @@ struct dwc3 {
 	u8			rx_max_burst_prd;
 	u8			tx_thr_num_pkt_prd;
 	u8			tx_max_burst_prd;
-	u8			clear_stall_protocol;
 
 	const char		*hsphy_interface;
 
@@ -1408,6 +1418,7 @@ struct dwc3 {
 	unsigned int		vbus_active:1;
 	/* Indicate if software connect was issued by the usb_gadget_driver */
 	unsigned int		softconnect:1;
+	bool usb_bootcomplete:1;
 	/*
 	 * If true, PM suspend/freeze allowed irrespective of host runtimePM
 	 * state. In PM suspend/resume case, core will stay powered and
@@ -1426,7 +1437,30 @@ struct dwc3 {
 	wait_queue_head_t	wait_linkstate;
 	struct work_struct	remote_wakeup_work;
 	bool			dual_port;
+#if IS_ENABLED(CONFIG_USB_CHARGING_EVENT)
+	struct work_struct	set_vbus_current_work;
+	int			vbus_current; /* 0 : 100mA, 1 : 500mA, 2: 900mA */
+#endif
+	struct delayed_work usb_event_work;
+	ktime_t rst_time_before;
+	ktime_t rst_time_first;
+	int rst_err_cnt;
+	bool rst_err_noti;
+	bool event_state;
+	bool acc_dev_status;
+	int usb_function_info;
 };
+
+#define GADGET_MTP	0x01
+#define GADGET_RNDIS	0x02
+#define GADGET_ACCESSORY	0x04
+#define GADGET_ADB	0x08
+#define GADGET_ACM	0x10
+#define GADGET_DM	0x20
+#define GADGET_MIDI	0x40
+#define GADGET_CONN_GADGET	0x80
+
+#define ERR_RESET_CNT	4
 
 #define INCRX_BURST_MODE 0
 #define INCRX_UNDEF_LENGTH_BURST_MODE 1

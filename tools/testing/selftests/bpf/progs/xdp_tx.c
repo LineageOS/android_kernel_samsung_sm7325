@@ -3,7 +3,7 @@
 #include <linux/bpf.h>
 #include "bpf_helpers.h"
 
-SEC("xdp")
+SEC("tx")
 int xdp_tx(struct xdp_md *xdp)
 {
 	return XDP_TX;

@@ -270,6 +270,9 @@ struct dirty_seglist_info {
 	struct mutex seglist_lock;		/* lock for segment bitmaps */
 	int nr_dirty[NR_DIRTY_TYPE];		/* # of dirty segments */
 	unsigned long *victim_secmap;		/* background GC victims */
+
+	/* W/A for FG_GC failure due to Atomic Write File and Pinned File */
+	unsigned long *blacklist_victim_secmap; /* GC Failed Bitmap */
 };
 
 /* victim selection function for cleaning and SSR */
@@ -499,8 +502,7 @@ static inline unsigned int free_segments(struct f2fs_sb_info *sbi)
 
 static inline int reserved_segments(struct f2fs_sb_info *sbi)
 {
-	return SM_I(sbi)->reserved_segments +
-			SM_I(sbi)->additional_reserved_segments;
+	return SM_I(sbi)->reserved_segments;
 }
 
 static inline unsigned int free_sections(struct f2fs_sb_info *sbi)

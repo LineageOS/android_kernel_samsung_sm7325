@@ -310,17 +310,11 @@ static void wait_for_panic(void)
 	panic("Panicing machine check CPU died");
 }
 
-static noinstr void mce_panic(const char *msg, struct mce *final, char *exp)
+static void mce_panic(const char *msg, struct mce *final, char *exp)
 {
+	int apei_err = 0;
 	struct llist_node *pending;
 	struct mce_evt_llist *l;
-	int apei_err = 0;
-
-	/*
-	 * Allow instrumentation around external facilities usage. Not that it
-	 * matters a whole lot since the machine is going to panic anyway.
-	 */
-	instrumentation_begin();
 
 	if (!fake_panic) {
 		/*
@@ -335,7 +329,7 @@ static noinstr void mce_panic(const char *msg, struct mce *final, char *exp)
 	} else {
 		/* Don't log too much for fake panic */
 		if (atomic_inc_return(&mce_fake_panicked) > 1)
-			goto out;
+			return;
 	}
 	pending = mce_gen_pool_prepare_records();
 	/* First print corrected ones that are still unlogged */
@@ -373,9 +367,6 @@ static noinstr void mce_panic(const char *msg, struct mce *final, char *exp)
 		panic(msg);
 	} else
 		pr_emerg(HW_ERR "Fake kernel panic: %s\n", msg);
-
-out:
-	instrumentation_end();
 }
 
 /* Support code for software error injection */
@@ -700,7 +691,7 @@ static struct notifier_block mce_default_nb = {
 /*
  * Read ADDR and MISC registers.
  */
-static noinstr void mce_read_aux(struct mce *m, int i)
+static void mce_read_aux(struct mce *m, int i)
 {
 	if (m->status & MCI_STATUS_MISCV)
 		m->misc = mce_rdmsrl(msr_ops.misc(i));
@@ -1080,13 +1071,10 @@ static int mce_start(int *no_way_out)
  * Synchronize between CPUs after main scanning loop.
  * This invokes the bulk of the Monarch processing.
  */
-static noinstr int mce_end(int order)
+static int mce_end(int order)
 {
-	u64 timeout = (u64)mca_cfg.monarch_timeout * NSEC_PER_USEC;
 	int ret = -1;
-
-	/* Allow instrumentation around external facilities. */
-	instrumentation_begin();
+	u64 timeout = (u64)mca_cfg.monarch_timeout * NSEC_PER_USEC;
 
 	if (!timeout)
 		goto reset;
@@ -1130,8 +1118,7 @@ static noinstr int mce_end(int order)
 		/*
 		 * Don't reset anything. That's done by the Monarch.
 		 */
-		ret = 0;
-		goto out;
+		return 0;
 	}
 
 	/*
@@ -1146,10 +1133,6 @@ reset:
 	 * Let others run again.
 	 */
 	atomic_set(&mce_executing, 0);
-
-out:
-	instrumentation_end();
-
 	return ret;
 }
 

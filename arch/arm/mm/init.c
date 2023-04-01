@@ -371,14 +371,14 @@ static void __init free_unused_memmap(void)
 		 */
 		start = min(start,
 				 ALIGN(prev_end, PAGES_PER_SECTION));
-#endif
+#else
 		/*
-		 * Align down here since many operations in VM subsystem
-		 * presume that there are no holes in the memory map inside
-		 * a pageblock
+		 * Align down here since the VM subsystem insists that the
+		 * memmap entries are valid from the bank start aligned to
+		 * MAX_ORDER_NR_PAGES.
 		 */
-		start = round_down(start, pageblock_nr_pages);
-
+		start = round_down(start, MAX_ORDER_NR_PAGES);
+#endif
 		/*
 		 * If we had a previous bank, and there is a space
 		 * between the current bank and the previous, free it.
@@ -387,20 +387,18 @@ static void __init free_unused_memmap(void)
 			free_memmap(prev_end, start);
 
 		/*
-		 * Align up here since many operations in VM subsystem
-		 * presume that there are no holes in the memory map inside
-		 * a pageblock
+		 * Align up here since the VM subsystem insists that the
+		 * memmap entries are valid from the bank end aligned to
+		 * MAX_ORDER_NR_PAGES.
 		 */
 		prev_end = ALIGN(memblock_region_memory_end_pfn(reg),
-				 pageblock_nr_pages);
+				 MAX_ORDER_NR_PAGES);
 	}
 
 #ifdef CONFIG_SPARSEMEM
-	if (!IS_ALIGNED(prev_end, PAGES_PER_SECTION)) {
-		prev_end = ALIGN(prev_end, pageblock_nr_pages);
+	if (!IS_ALIGNED(prev_end, PAGES_PER_SECTION))
 		free_memmap(prev_end,
 			    ALIGN(prev_end, PAGES_PER_SECTION));
-	}
 #endif
 }
 
@@ -521,11 +519,7 @@ static void print_vmalloc_lowmem_info(void)
 void __init mem_init(void)
 {
 #ifdef CONFIG_ARM_LPAE
-	if (swiotlb_force == SWIOTLB_FORCE ||
-	    max_pfn > arm_dma_pfn_limit)
-		swiotlb_init(1);
-	else
-		swiotlb_force = SWIOTLB_NO_FORCE;
+	swiotlb_init(1);
 #endif
 
 	set_max_mapnr(pfn_to_page(max_pfn) - mem_map);

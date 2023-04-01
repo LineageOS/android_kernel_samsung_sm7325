@@ -36,6 +36,12 @@
 #include "core.h"
 #include "gadget.h"
 #include "io.h"
+#if IS_MODULE(CONFIG_BATTERY_SAMSUNG)
+#include <linux/battery/sec_battery_common.h>
+#elif defined(CONFIG_BATTERY_SAMSUNG)
+#include "../../battery/common/sec_charging_common.h"
+#endif
+#include <linux/usb_notify.h>
 
 #include "debug.h"
 
@@ -45,6 +51,52 @@ static int count;
 static struct dwc3 *dwc3_instance[DWC_CTRL_COUNT];
 
 static void dwc3_check_params(struct dwc3 *dwc);
+
+#if IS_ENABLED(CONFIG_USB_CHARGING_EVENT)
+/* for BC1.2 spec */
+int dwc3_set_vbus_current(int state)
+{
+	struct power_supply *psy;
+	union power_supply_propval pval = {0};
+
+	pr_info("usb: %s : %dmA\n", __func__, state);
+	psy = power_supply_get_by_name("battery");
+	if (!psy) {
+		pr_err("%s: fail to get battery power_supply\n", __func__);
+		return -1;
+	}
+
+	pval.intval = state;
+	psy_do_property("battery", set, POWER_SUPPLY_EXT_PROP_USB_CONFIGURE, pval);
+	power_supply_put(psy);
+	return 0;
+}
+
+static void dwc3_msm_set_vbus_current_work(struct work_struct *w)
+{
+	struct dwc3 *dwc = container_of(w, struct dwc3, set_vbus_current_work);
+	struct otg_notify *o_notify = get_otg_notify();
+
+	switch (dwc->vbus_current) {
+	case USB_CURRENT_SUSPENDED:
+	/* set vbus current for suspend state is called in usb_notify. */
+		send_otg_notify(o_notify, NOTIFY_EVENT_USBD_SUSPENDED, 1);
+		goto skip;
+	case USB_CURRENT_UNCONFIGURED:
+		send_otg_notify(o_notify, NOTIFY_EVENT_USBD_UNCONFIGURED, 1);
+		break;
+	case USB_CURRENT_HIGH_SPEED:
+	case USB_CURRENT_SUPER_SPEED:
+		send_otg_notify(o_notify, NOTIFY_EVENT_USBD_CONFIGURED, 1);
+		break;
+	default:
+		break;
+	}
+	dwc3_set_vbus_current(dwc->vbus_current);
+skip:
+	return;
+}
+#endif
 
 /**
  * dwc3_get_dr_mode - Validates and sets dr_mode
@@ -1157,27 +1209,11 @@ int dwc3_core_init(struct dwc3 *dwc)
 		dwc3_writel(dwc->regs, DWC31_LCSR_TX_DEEMPH_3(0),
 			dwc->gen2_tx_de_emph3 & DWC31_TX_DEEMPH_MASK);
 
-	/*
-	 * Set inter-packet gap 199.794ns to improve EL_23 margin.
-	 *
-	 * STAR 9001346572: Host: When a Single USB 2.0 Endpoint Receives NAKs Continuously, Host
-	 * Stops Transfers to Other Endpoints. When an active endpoint that is not currently cached
-	 * in the host controller is chosen to be cached to the same cache index as the endpoint
-	 * that receives NAK, The endpoint that receives the NAK responses would be in continuous
-	 * retry mode that would prevent it from getting evicted out of the host controller cache.
-	 * This would prevent the new endpoint to get into the endpoint cache and therefore service
-	 * to this endpoint is not done.
-	 * The workaround is to disable lower layer LSP retrying the USB2.0 NAKed transfer. Forcing
-	 * this to LSP upper layer allows next EP to evict the stuck EP from cache.
-	 */
+	/* set inter-packet gap 199.794ns to improve EL_23 margin */
 	if (dwc->revision >= DWC3_USB31_REVISION_170A) {
 		reg = dwc3_readl(dwc->regs, DWC3_GUCTL1);
 		reg |= DWC3_GUCTL1_IP_GAP_ADD_ON(1);
 		dwc3_writel(dwc->regs, DWC3_GUCTL1, reg);
-
-		reg = dwc3_readl(dwc->regs, DWC3_GUCTL3);
-		reg |= DWC3_GUCTL3_USB20_RETRY_DISABLE;
-		dwc3_writel(dwc->regs, DWC3_GUCTL3, reg);
 	}
 
 	return 0;
@@ -1790,6 +1826,10 @@ static int dwc3_probe(struct platform_device *pdev)
 
 	pm_runtime_allow(dev);
 	dwc3_debugfs_init(dwc);
+#if IS_ENABLED(CONFIG_USB_CHARGING_EVENT)
+	INIT_WORK(&dwc->set_vbus_current_work, dwc3_msm_set_vbus_current_work);
+#endif
+
 	return 0;
 
 err3:

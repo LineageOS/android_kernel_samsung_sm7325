@@ -12,6 +12,9 @@
 #include <asm/pgtable-hwdef.h>
 #include <asm/pgtable-prot.h>
 #include <asm/tlbflush.h>
+#ifdef CONFIG_RKP
+#include <linux/rkp.h>
+#endif
 
 /*
  * VMALLOC range.
@@ -54,15 +57,9 @@ extern unsigned long empty_zero_page[PAGE_SIZE / sizeof(unsigned long)];
  * page table entry, taking care of 52-bit addresses.
  */
 #ifdef CONFIG_ARM64_PA_BITS_52
-static inline phys_addr_t __pte_to_phys(pte_t pte)
-{
-	return (pte_val(pte) & PTE_ADDR_LOW) |
-		((pte_val(pte) & PTE_ADDR_HIGH) << 36);
-}
-static inline pteval_t __phys_to_pte_val(phys_addr_t phys)
-{
-	return (phys | (phys >> 36)) & PTE_ADDR_MASK;
-}
+#define __pte_to_phys(pte)	\
+	((pte_val(pte) & PTE_ADDR_LOW) | ((pte_val(pte) & PTE_ADDR_HIGH) << 36))
+#define __phys_to_pte_val(phys)	(((phys) | ((phys) >> 36)) & PTE_ADDR_MASK)
 #else
 #define __pte_to_phys(pte)	(pte_val(pte) & PTE_ADDR_MASK)
 #define __phys_to_pte_val(phys)	(phys)
@@ -788,7 +785,16 @@ static inline int pmdp_test_and_clear_young(struct vm_area_struct *vma,
 static inline pte_t ptep_get_and_clear(struct mm_struct *mm,
 				       unsigned long address, pte_t *ptep)
 {
+#ifdef CONFIG_RKP
+	pte_t old = __pte(pte_val(*ptep));
+	pte_t zero_pte;
+
+	pte_val(zero_pte) = 0;
+	set_pte(ptep, zero_pte);
+	return old;
+#else
 	return __pte(xchg_relaxed(&pte_val(*ptep), 0));
+#endif
 }
 
 #ifdef CONFIG_TRANSPARENT_HUGEPAGE

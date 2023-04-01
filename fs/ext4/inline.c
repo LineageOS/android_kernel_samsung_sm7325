@@ -747,13 +747,18 @@ int ext4_write_inline_data_end(struct inode *inode, loff_t pos, unsigned len,
 	void *kaddr;
 	struct ext4_iloc iloc;
 
-	if (unlikely(copied < len) && !PageUptodate(page))
-		return 0;
+	if (unlikely(copied < len)) {
+		if (!PageUptodate(page)) {
+			copied = 0;
+			goto out;
+		}
+	}
 
 	ret = ext4_get_inode_loc(inode, &iloc);
 	if (ret) {
 		ext4_std_error(inode->i_sb, ret);
-		return ret;
+		copied = 0;
+		goto out;
 	}
 
 	ext4_write_lock_xattr(inode, &no_expand);
@@ -766,7 +771,7 @@ int ext4_write_inline_data_end(struct inode *inode, loff_t pos, unsigned len,
 	(void) ext4_find_inline_data_nolock(inode);
 
 	kaddr = kmap_atomic(page);
-	ext4_write_inline_data(inode, &iloc, kaddr, pos, copied);
+	ext4_write_inline_data(inode, &iloc, kaddr, pos, len);
 	kunmap_atomic(kaddr);
 	SetPageUptodate(page);
 	/* clear page dirty so that writepages wouldn't work for us. */
@@ -775,7 +780,7 @@ int ext4_write_inline_data_end(struct inode *inode, loff_t pos, unsigned len,
 	ext4_write_unlock_xattr(inode, &no_expand);
 	brelse(iloc.bh);
 	mark_inode_dirty(inode);
-
+out:
 	return copied;
 }
 
@@ -1134,15 +1139,7 @@ static void ext4_restore_inline_data(handle_t *handle, struct inode *inode,
 				     struct ext4_iloc *iloc,
 				     void *buf, int inline_size)
 {
-	int ret;
-
-	ret = ext4_create_inline_data(handle, inode, inline_size);
-	if (ret) {
-		ext4_msg(inode->i_sb, KERN_EMERG,
-			"error restoring inline_data for inode -- potential data loss! (inode %lu, error %d)",
-			inode->i_ino, ret);
-		return;
-	}
+	ext4_create_inline_data(handle, inode, inline_size);
 	ext4_write_inline_data(inode, iloc, buf, 0, inline_size);
 	ext4_set_inode_state(inode, EXT4_STATE_MAY_INLINE_DATA);
 }

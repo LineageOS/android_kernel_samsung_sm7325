@@ -3173,7 +3173,6 @@ qed_mcp_get_nvm_image_att(struct qed_hwfn *p_hwfn,
 			  struct qed_nvm_image_att *p_image_att)
 {
 	enum nvm_image_type type;
-	int rc;
 	u32 i;
 
 	/* Translate image_id into MFW definitions */
@@ -3199,10 +3198,7 @@ qed_mcp_get_nvm_image_att(struct qed_hwfn *p_hwfn,
 		return -EINVAL;
 	}
 
-	rc = qed_mcp_nvm_info_populate(p_hwfn);
-	if (rc)
-		return rc;
-
+	qed_mcp_nvm_info_populate(p_hwfn);
 	for (i = 0; i < p_hwfn->nvm_info.num_images; i++)
 		if (type == p_hwfn->nvm_info.image_att[i].image_type)
 			break;

@@ -561,14 +561,14 @@ static int __init hh_msgq_init(void)
 		spin_lock_init(&cap_table_entry->rx_lock);
 		spin_lock_init(&cap_table_entry->cap_entry_lock);
 
-		cap_table_entry->tx_irq_name = kasprintf(GFP_ATOMIC,
+		cap_table_entry->tx_irq_name = kasprintf(GFP_KERNEL,
 							"hh_msgq_tx_%d", i);
 		if (!cap_table_entry->tx_irq_name) {
 			ret = -ENOMEM;
 			goto err;
 		}
 
-		cap_table_entry->rx_irq_name = kasprintf(GFP_ATOMIC,
+		cap_table_entry->rx_irq_name = kasprintf(GFP_KERNEL,
 							"hh_msgq_rx_%d", i);
 		if (!cap_table_entry->rx_irq_name) {
 			ret = -ENOMEM;

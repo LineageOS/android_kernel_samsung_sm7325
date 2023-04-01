@@ -583,7 +583,6 @@
   __kfifo_alloc
   __kfifo_free
   kmalloc_order_trace
-  ktime_get_with_offset
   __local_bh_enable_ip
   memmove
   param_ops_ulong
@@ -591,7 +590,6 @@
   __rcu_read_lock
   __rcu_read_unlock
   regulatory_hint
-  rfc1042_header
   skb_copy
   skb_realloc_headroom
   strlcat
@@ -662,7 +660,6 @@
   phy_pm_runtime_get_sync
   phy_pm_runtime_put_sync
   platform_get_irq_byname_optional
-  pm_runtime_barrier
   system_freezable_wq
   usb_add_gadget_udc
   usb_decode_ctrl
@@ -736,6 +733,7 @@
   generic_file_read_iter
   generic_file_splice_read
   generic_read_dir
+  generic_shutdown_super
   __get_free_pages
   get_zeroed_page
   iget5_locked
@@ -747,7 +745,6 @@
   kernel_read
   kernel_write
   kern_path
-  kill_anon_super
   kobject_create_and_add
   kobject_put
   lockref_get

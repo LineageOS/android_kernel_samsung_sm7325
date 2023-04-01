@@ -77,6 +77,9 @@ const char *selinux_policycap_names[__POLICYDB_CAPABILITY_MAX] = {
 };
 
 static struct selinux_ss selinux_ss;
+// [ SEC_SELINUX_PORTING_COMMON
+int ss_initialized;
+// [ SEC_SELINUX_PORTING_COMMON
 
 void selinux_ss_init(struct selinux_ss **ss)
 {
@@ -740,8 +743,13 @@ out:
 	kfree(n);
 	kfree(t);
 
-	if (!enforcing_enabled(state))
+// [ SEC_SELINUX_PORTING_COMMON
+#ifdef CONFIG_ALWAYS_ENFORCE
+	selinux_enforcing = 1;
+#endif
+	if (!selinux_enforcing) // SEC_SELINUX_PORTING_COMMON Change to use RKP
 		return 0;
+// ] SEC_SELINUX_PORTING_COMMON
 	return -EPERM;
 }
 
@@ -760,7 +768,7 @@ static int security_compute_validatetrans(struct selinux_state *state,
 	int rc = 0;
 
 
-	if (!state->initialized)
+	if (!ss_initialized) // SEC_SELINUX_PORTING_COMMON Change to use RKP 
 		return 0;
 
 	read_lock(&state->ss->policy_rwlock);
@@ -860,7 +868,7 @@ int security_bounded_transition(struct selinux_state *state,
 	int index;
 	int rc;
 
-	if (!state->initialized)
+	if (!ss_initialized) // SEC_SELINUX_PORTING_COMMON Change to use RKP
 		return 0;
 
 	read_lock(&state->ss->policy_rwlock);
@@ -1019,7 +1027,7 @@ void security_compute_xperms_decision(struct selinux_state *state,
 	memset(xpermd->dontaudit->p, 0, sizeof(xpermd->dontaudit->p));
 
 	read_lock(&state->ss->policy_rwlock);
-	if (!state->initialized)
+	if (!ss_initialized) // SEC_SELINUX_PORTING_COMMON Change to use RKP 
 		goto allow;
 
 	policydb = &state->ss->policydb;
@@ -1104,7 +1112,7 @@ void security_compute_av(struct selinux_state *state,
 	read_lock(&state->ss->policy_rwlock);
 	avd_init(state, avd);
 	xperms->len = 0;
-	if (!state->initialized)
+	if (!ss_initialized) // SEC_SELINUX_PORTING_COMMON Change to use RKP 
 		goto allow;
 
 	policydb = &state->ss->policydb;
@@ -1158,7 +1166,7 @@ void security_compute_av_user(struct selinux_state *state,
 
 	read_lock(&state->ss->policy_rwlock);
 	avd_init(state, avd);
-	if (!state->initialized)
+	if (!ss_initialized) // SEC_SELINUX_PORTING_COMMON Change to use RKP 
 		goto allow;
 
 	policydb = &state->ss->policydb;
@@ -1210,6 +1218,9 @@ static int context_struct_to_string(struct policydb *p,
 				    char **scontext, u32 *scontext_len)
 {
 	char *scontextp;
+// [ SEC_SELINUX_PORTING_COMMON 
+	gfp_t kmalloc_flag = GFP_ATOMIC;
+// ] SEC_SELINUX_PORTING_COMMON 
 
 	if (scontext)
 		*scontext = NULL;
@@ -1235,7 +1246,11 @@ static int context_struct_to_string(struct policydb *p,
 		return 0;
 
 	/* Allocate space for the context; caller must free this space. */
-	scontextp = kmalloc(*scontext_len, GFP_ATOMIC);
+// [ SEC_SELINUX_PORTING_COMMON 
+	if (!in_interrupt() && !in_atomic())
+		kmalloc_flag = GFP_KERNEL;
+	scontextp = kmalloc(*scontext_len, kmalloc_flag);
+// ] SEC_SELINUX_PORTING_COMMON 	
 	if (!scontextp)
 		return -ENOMEM;
 	*scontext = scontextp;
@@ -1260,12 +1275,6 @@ static int context_struct_to_string(struct policydb *p,
 int security_sidtab_hash_stats(struct selinux_state *state, char *page)
 {
 	int rc;
-
-	if (!state->initialized) {
-		pr_err("SELinux: %s:  called before initial load_policy\n",
-		       __func__);
-		return -EINVAL;
-	}
 
 	read_lock(&state->ss->policy_rwlock);
 	rc = sidtab_hash_stats(state->ss->sidtab, page);
@@ -1295,7 +1304,7 @@ static int security_sid_to_context_core(struct selinux_state *state,
 		*scontext = NULL;
 	*scontext_len  = 0;
 
-	if (!state->initialized) {
+	if (!ss_initialized) { // SEC_SELINUX_PORTING_COMMON Change to use RKP
 		if (sid <= SECINITSID_NUM) {
 			char *scontextp;
 
@@ -1522,7 +1531,7 @@ static int security_context_to_sid_core(struct selinux_state *state,
 	if (!scontext2)
 		return -ENOMEM;
 
-	if (!state->initialized) {
+	if (!ss_initialized) { // SEC_SELINUX_PORTING_COMMON Change to use RKP 
 		int i;
 
 		for (i = 1; i < SECINITSID_NUM; i++) {
@@ -1655,8 +1664,13 @@ out:
 	kfree(s);
 	kfree(t);
 	kfree(n);
-	if (!enforcing_enabled(state))
+// [ SEC_SELINUX_PORTING_COMMON
+#ifdef CONFIG_ALWAYS_ENFORCE
+	selinux_enforcing = 1;
+#endif
+	if (!selinux_enforcing) // SEC_SELINUX_PORTING_COMMON Change to use RKP 
 		return 0;
+// ] SEC_SELINUX_PORTING_COMMON
 	return -EACCES;
 }
 
@@ -1707,7 +1721,7 @@ static int security_compute_sid(struct selinux_state *state,
 	int rc = 0;
 	bool sock;
 
-	if (!state->initialized) {
+	if (!ss_initialized) { // SEC_SELINUX_PORTING_COMMON Change to use RKP
 		switch (orig_tclass) {
 		case SECCLASS_PROCESS: /* kernel value */
 			*out_sid = ssid;
@@ -1953,8 +1967,13 @@ static inline int convert_context_handle_invalid_context(
 	char *s;
 	u32 len;
 
-	if (enforcing_enabled(state))
+	// [ SEC_SELINUX_PORTING_COMMON 
+#ifdef CONFIG_ALWAYS_ENFORCE
+	selinux_enforcing = 1;
+#endif
+	if (!selinux_enforcing) // SEC_SELINUX_PORTING_COMMON Change to use RKP
 		return -EINVAL;
+// ] SEC_SELINUX_PORTING_COMMON
 
 	if (!context_struct_to_string(policydb, context, &s, &len)) {
 		pr_warn("SELinux:  Context %s would be invalid if enforcing\n",
@@ -2172,7 +2191,7 @@ int security_load_policy(struct selinux_state *state, void *data, size_t len)
 		goto out;
 	}
 
-	if (!state->initialized) {
+	if (!ss_initialized) { // SEC_SELINUX_PORTING_COMMON Change to use RKP 
 		rc = policydb_read(policydb, fp);
 		if (rc) {
 			kfree(newsidtab);
@@ -2197,7 +2216,7 @@ int security_load_policy(struct selinux_state *state, void *data, size_t len)
 
 		state->ss->sidtab = newsidtab;
 		security_load_policycaps(state);
-		state->initialized = 1;
+		ss_initialized = 1; // SEC_SELINUX_PORTING_COMMON Change to use RKP
 		seqno = ++state->ss->latest_granting;
 		selinux_complete_init();
 		avc_ss_reset(state->avc, seqno);
@@ -2314,43 +2333,6 @@ size_t security_policydb_len(struct selinux_state *state)
 }
 
 /**
- * ocontext_to_sid - Helper to safely get sid for an ocontext
- * @sidtab: SID table
- * @c: ocontext structure
- * @index: index of the context entry (0 or 1)
- * @out_sid: pointer to the resulting SID value
- *
- * For all ocontexts except OCON_ISID the SID fields are populated
- * on-demand when needed. Since updating the SID value is an SMP-sensitive
- * operation, this helper must be used to do that safely.
- *
- * WARNING: This function may return -ESTALE, indicating that the caller
- * must retry the operation after re-acquiring the policy pointer!
- */
-static int ocontext_to_sid(struct sidtab *sidtab, struct ocontext *c,
-			   size_t index, u32 *out_sid)
-{
-	int rc;
-	u32 sid;
-
-	/* Ensure the associated sidtab entry is visible to this thread. */
-	sid = smp_load_acquire(&c->sid[index]);
-	if (!sid) {
-		rc = sidtab_context_to_sid(sidtab, &c->context[index], &sid);
-		if (rc)
-			return rc;
-
-		/*
-		 * Ensure the new sidtab entry is visible to other threads
-		 * when they see the SID.
-		 */
-		smp_store_release(&c->sid[index], sid);
-	}
-	*out_sid = sid;
-	return 0;
-}
-
-/**
  * security_port_sid - Obtain the SID for a port.
  * @protocol: protocol number
  * @port: port number
@@ -2362,12 +2344,10 @@ int security_port_sid(struct selinux_state *state,
 	struct policydb *policydb;
 	struct sidtab *sidtab;
 	struct ocontext *c;
-	int rc;
+	int rc = 0;
 
 	read_lock(&state->ss->policy_rwlock);
 
-retry:
-	rc = 0;
 	policydb = &state->ss->policydb;
 	sidtab = state->ss->sidtab;
 
@@ -2381,11 +2361,13 @@ retry:
 	}
 
 	if (c) {
-		rc = ocontext_to_sid(sidtab, c, 0, out_sid);
-		if (rc == -ESTALE)
-			goto retry;
-		if (rc)
-			goto out;
+		if (!c->sid[0]) {
+			rc = context_struct_to_sid(state, &c->context[0],
+						   &c->sid[0]);
+			if (rc)
+				goto out;
+		}
+		*out_sid = c->sid[0];
 	} else {
 		*out_sid = SECINITSID_PORT;
 	}
@@ -2405,16 +2387,12 @@ int security_ib_pkey_sid(struct selinux_state *state,
 			 u64 subnet_prefix, u16 pkey_num, u32 *out_sid)
 {
 	struct policydb *policydb;
-	struct sidtab *sidtab;
 	struct ocontext *c;
-	int rc;
+	int rc = 0;
 
 	read_lock(&state->ss->policy_rwlock);
 
-retry:
-	rc = 0;
 	policydb = &state->ss->policydb;
-	sidtab = state->ss->sidtab;
 
 	c = policydb->ocontexts[OCON_IBPKEY];
 	while (c) {
@@ -2427,11 +2405,14 @@ retry:
 	}
 
 	if (c) {
-		rc = ocontext_to_sid(sidtab, c, 0, out_sid);
-		if (rc == -ESTALE)
-			goto retry;
-		if (rc)
-			goto out;
+		if (!c->sid[0]) {
+			rc = context_struct_to_sid(state,
+						   &c->context[0],
+						   &c->sid[0]);
+			if (rc)
+				goto out;
+		}
+		*out_sid = c->sid[0];
 	} else
 		*out_sid = SECINITSID_UNLABELED;
 
@@ -2452,12 +2433,10 @@ int security_ib_endport_sid(struct selinux_state *state,
 	struct policydb *policydb;
 	struct sidtab *sidtab;
 	struct ocontext *c;
-	int rc;
+	int rc = 0;
 
 	read_lock(&state->ss->policy_rwlock);
 
-retry:
-	rc = 0;
 	policydb = &state->ss->policydb;
 	sidtab = state->ss->sidtab;
 
@@ -2473,11 +2452,13 @@ retry:
 	}
 
 	if (c) {
-		rc = ocontext_to_sid(sidtab, c, 0, out_sid);
-		if (rc == -ESTALE)
-			goto retry;
-		if (rc)
-			goto out;
+		if (!c->sid[0]) {
+			rc = context_struct_to_sid(state, &c->context[0],
+						   &c->sid[0]);
+			if (rc)
+				goto out;
+		}
+		*out_sid = c->sid[0];
 	} else
 		*out_sid = SECINITSID_UNLABELED;
 
@@ -2496,13 +2477,11 @@ int security_netif_sid(struct selinux_state *state,
 {
 	struct policydb *policydb;
 	struct sidtab *sidtab;
-	int rc;
+	int rc = 0;
 	struct ocontext *c;
 
 	read_lock(&state->ss->policy_rwlock);
 
-retry:
-	rc = 0;
 	policydb = &state->ss->policydb;
 	sidtab = state->ss->sidtab;
 
@@ -2514,11 +2493,17 @@ retry:
 	}
 
 	if (c) {
-		rc = ocontext_to_sid(sidtab, c, 0, if_sid);
-		if (rc == -ESTALE)
-			goto retry;
-		if (rc)
-			goto out;
+		if (!c->sid[0] || !c->sid[1]) {
+			rc = context_struct_to_sid(state, &c->context[0],
+						   &c->sid[0]);
+			if (rc)
+				goto out;
+			rc = context_struct_to_sid(state, &c->context[1],
+						   &c->sid[1]);
+			if (rc)
+				goto out;
+		}
+		*if_sid = c->sid[0];
 	} else
 		*if_sid = SECINITSID_NETIF;
 
@@ -2554,15 +2539,12 @@ int security_node_sid(struct selinux_state *state,
 		      u32 *out_sid)
 {
 	struct policydb *policydb;
-	struct sidtab *sidtab;
 	int rc;
 	struct ocontext *c;
 
 	read_lock(&state->ss->policy_rwlock);
 
-retry:
 	policydb = &state->ss->policydb;
-	sidtab = state->ss->sidtab;
 
 	switch (domain) {
 	case AF_INET: {
@@ -2603,11 +2585,14 @@ retry:
 	}
 
 	if (c) {
-		rc = ocontext_to_sid(sidtab, c, 0, out_sid);
-		if (rc == -ESTALE)
-			goto retry;
-		if (rc)
-			goto out;
+		if (!c->sid[0]) {
+			rc = context_struct_to_sid(state,
+						   &c->context[0],
+						   &c->sid[0]);
+			if (rc)
+				goto out;
+		}
+		*out_sid = c->sid[0];
 	} else {
 		*out_sid = SECINITSID_NODE;
 	}
@@ -2653,7 +2638,7 @@ int security_get_user_sids(struct selinux_state *state,
 	*sids = NULL;
 	*nel = 0;
 
-	if (!state->initialized)
+	if (!ss_initialized) // SEC_SELINUX_PORTING_COMMON Change to use RKP
 		goto out;
 
 	read_lock(&state->ss->policy_rwlock);
@@ -2766,12 +2751,11 @@ static inline int __security_genfs_sid(struct selinux_state *state,
 				       u32 *sid)
 {
 	struct policydb *policydb = &state->ss->policydb;
-	struct sidtab *sidtab = state->ss->sidtab;
 	int len;
 	u16 sclass;
 	struct genfs *genfs;
 	struct ocontext *c;
-	int cmp = 0;
+	int rc, cmp = 0;
 
 	while (path[0] == '/' && path[1] == '/')
 		path++;
@@ -2785,8 +2769,9 @@ static inline int __security_genfs_sid(struct selinux_state *state,
 			break;
 	}
 
+	rc = -ENOENT;
 	if (!genfs || cmp)
-		return -ENOENT;
+		goto out;
 
 	for (c = genfs->head; c; c = c->next) {
 		len = strlen(c->u.name);
@@ -2795,10 +2780,20 @@ static inline int __security_genfs_sid(struct selinux_state *state,
 			break;
 	}
 
+	rc = -ENOENT;
 	if (!c)
-		return -ENOENT;
+		goto out;
 
-	return ocontext_to_sid(sidtab, c, 0, sid);
+	if (!c->sid[0]) {
+		rc = context_struct_to_sid(state, &c->context[0], &c->sid[0]);
+		if (rc)
+			goto out;
+	}
+
+	*sid = c->sid[0];
+	rc = 0;
+out:
+	return rc;
 }
 
 /**
@@ -2833,15 +2828,13 @@ int security_fs_use(struct selinux_state *state, struct super_block *sb)
 {
 	struct policydb *policydb;
 	struct sidtab *sidtab;
-	int rc;
+	int rc = 0;
 	struct ocontext *c;
 	struct superblock_security_struct *sbsec = sb->s_security;
 	const char *fstype = sb->s_type->name;
 
 	read_lock(&state->ss->policy_rwlock);
 
-retry:
-	rc = 0;
 	policydb = &state->ss->policydb;
 	sidtab = state->ss->sidtab;
 
@@ -2854,11 +2847,13 @@ retry:
 
 	if (c) {
 		sbsec->behavior = c->v.behavior;
-		rc = ocontext_to_sid(sidtab, c, 0, &sbsec->sid);
-		if (rc == -ESTALE)
-			goto retry;
-		if (rc)
-			goto out;
+		if (!c->sid[0]) {
+			rc = context_struct_to_sid(state, &c->context[0],
+						   &c->sid[0]);
+			if (rc)
+				goto out;
+		}
+		sbsec->sid = c->sid[0];
 	} else {
 		rc = __security_genfs_sid(state, fstype, "/", SECCLASS_DIR,
 					  &sbsec->sid);
@@ -2881,7 +2876,7 @@ int security_get_bools(struct selinux_state *state,
 	struct policydb *policydb;
 	int i, rc;
 
-	if (!state->initialized) {
+	if (!ss_initialized) {// SEC_SELINUX_PORTING_COMMON Change to use RKP 
 		*len = 0;
 		*names = NULL;
 		*values = NULL;
@@ -3060,7 +3055,7 @@ int security_sid_mls_copy(struct selinux_state *state,
 	int rc;
 
 	rc = 0;
-	if (!state->initialized || !policydb->mls_enabled) {
+	if (!ss_initialized || !policydb->mls_enabled) {// SEC_SELINUX_PORTING_COMMON Change to use RKP 
 		*new_sid = sid;
 		goto out;
 	}
@@ -3227,7 +3222,7 @@ int security_get_classes(struct selinux_state *state,
 	struct policydb *policydb = &state->ss->policydb;
 	int rc;
 
-	if (!state->initialized) {
+	if (!ss_initialized) {// SEC_SELINUX_PORTING_COMMON Change to use RKP 
 		*nclasses = 0;
 		*classes = NULL;
 		return 0;
@@ -3376,7 +3371,7 @@ int selinux_audit_rule_init(u32 field, u32 op, char *rulestr, void **vrule)
 
 	*rule = NULL;
 
-	if (!state->initialized)
+	if (!ss_initialized) // SEC_SELINUX_PORTING_COMMON Change to use RKP
 		return -EOPNOTSUPP;
 
 	switch (field) {
@@ -3675,7 +3670,7 @@ int security_netlbl_secattr_to_sid(struct selinux_state *state,
 	struct context *ctx;
 	struct context ctx_new;
 
-	if (!state->initialized) {
+	if (!ss_initialized) {// SEC_SELINUX_PORTING_COMMON Change to use RKP
 		*sid = SECSID_NULL;
 		return 0;
 	}
@@ -3742,7 +3737,7 @@ int security_netlbl_sid_to_secattr(struct selinux_state *state,
 	int rc;
 	struct context *ctx;
 
-	if (!state->initialized)
+	if (!ss_initialized) // SEC_SELINUX_PORTING_COMMON Change to use RKP
 		return 0;
 
 	read_lock(&state->ss->policy_rwlock);
@@ -3781,7 +3776,7 @@ int security_read_policy(struct selinux_state *state,
 	int rc;
 	struct policy_file fp;
 
-	if (!state->initialized)
+	if (!ss_initialized) // SEC_SELINUX_PORTING_COMMON Change to use RKP
 		return -EINVAL;
 
 	*len = security_policydb_len(state);

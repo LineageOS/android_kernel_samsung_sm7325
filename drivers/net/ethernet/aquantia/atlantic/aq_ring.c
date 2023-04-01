@@ -305,10 +305,6 @@ int aq_ring_rx_clean(struct aq_ring_s *self,
 		if (!buff->is_eop) {
 			buff_ = buff;
 			do {
-				if (buff_->next >= self->size) {
-					err = -EIO;
-					goto err_exit;
-				}
 				next_ = buff_->next,
 				buff_ = &self->buff_ring[next_];
 				is_rsc_completed =
@@ -331,10 +327,6 @@ int aq_ring_rx_clean(struct aq_ring_s *self,
 			if (buff->is_error || buff->is_cso_err) {
 				buff_ = buff;
 				do {
-					if (buff_->next >= self->size) {
-						err = -EIO;
-						goto err_exit;
-					}
 					next_ = buff_->next,
 					buff_ = &self->buff_ring[next_];
 

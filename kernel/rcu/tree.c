@@ -1190,6 +1190,10 @@ static bool rcu_start_this_gp(struct rcu_node *rnp_start, struct rcu_data *rdp,
 	trace_rcu_this_gp(rnp, rdp, gp_seq_req, TPS("Startedroot"));
 	WRITE_ONCE(rcu_state.gp_flags, rcu_state.gp_flags | RCU_GP_FLAG_INIT);
 	rcu_state.gp_req_activity = jiffies;
+	WRITE_ONCE(rcu_state.gp_req_activity_ts, ktime_get_ns());
+	WRITE_ONCE(rcu_state.gp_req_activity_task, current);
+	WRITE_ONCE(rcu_state.gp_req_activity_last_gp_flag, rcu_state.gp_flags);
+
 	if (!rcu_state.gp_kthread) {
 		trace_rcu_this_gp(rnp, rdp, gp_seq_req, TPS("NoGPkthread"));
 		goto unlock_out;
@@ -1243,11 +1247,17 @@ static void rcu_gp_kthread_wake(void)
 	if ((current == rcu_state.gp_kthread &&
 	     !in_irq() && !in_serving_softirq()) ||
 	    !READ_ONCE(rcu_state.gp_flags) ||
-	    !rcu_state.gp_kthread)
+	    !rcu_state.gp_kthread) {
+			WRITE_ONCE(rcu_state.last_skip_flag, READ_ONCE(rcu_state.gp_flags));
+			WRITE_ONCE(rcu_state.last_skip_task, current);
+			WRITE_ONCE(rcu_state.last_skip_ts, ktime_get_ns());
 		return;
+	}
 	WRITE_ONCE(rcu_state.gp_wake_time, jiffies);
 	WRITE_ONCE(rcu_state.gp_wake_seq, READ_ONCE(rcu_state.gp_seq));
 	swake_up_one(&rcu_state.gp_wq);
+	WRITE_ONCE(rcu_state.gp_wake_task, current);
+	WRITE_ONCE(rcu_state.gp_wake_time_ts, ktime_get_ns());
 }
 
 /*
@@ -1360,11 +1370,10 @@ static void __maybe_unused rcu_advance_cbs_nowake(struct rcu_node *rnp,
 						  struct rcu_data *rdp)
 {
 	rcu_lockdep_assert_cblist_protected(rdp);
-	if (!rcu_seq_state(rcu_seq_current(&rnp->gp_seq)) || !raw_spin_trylock_rcu_node(rnp))
+	if (!rcu_seq_state(rcu_seq_current(&rnp->gp_seq)) ||
+	    !raw_spin_trylock_rcu_node(rnp))
 		return;
-	// The grace period cannot end while we hold the rcu_node lock.
-	if (rcu_seq_state(rcu_seq_current(&rnp->gp_seq)))
-		WARN_ON_ONCE(rcu_advance_cbs(rnp, rdp));
+	WARN_ON_ONCE(rcu_advance_cbs(rnp, rdp));
 	raw_spin_unlock_rcu_node(rnp);
 }
 
@@ -1605,7 +1614,7 @@ static void rcu_gp_fqs(bool first_time)
 	struct rcu_node *rnp = rcu_get_root();
 
 	WRITE_ONCE(rcu_state.gp_activity, jiffies);
-	WRITE_ONCE(rcu_state.n_force_qs, rcu_state.n_force_qs + 1);
+	rcu_state.n_force_qs++;
 	if (first_time) {
 		/* Collect dyntick-idle snapshots. */
 		force_qs_rnp(dyntick_save_progress_counter);
@@ -1766,6 +1775,9 @@ static void rcu_gp_cleanup(void)
 	if ((offloaded || !rcu_accelerate_cbs(rnp, rdp)) && needgp) {
 		WRITE_ONCE(rcu_state.gp_flags, RCU_GP_FLAG_INIT);
 		rcu_state.gp_req_activity = jiffies;
+		WRITE_ONCE(rcu_state.gp_req_activity_ts, ktime_get_ns());
+		WRITE_ONCE(rcu_state.gp_req_activity_task, current);
+		WRITE_ONCE(rcu_state.gp_req_activity_last_gp_flag, rcu_state.gp_flags);
 		trace_rcu_grace_period(rcu_state.name,
 				       READ_ONCE(rcu_state.gp_seq),
 				       TPS("newreq"));
@@ -1781,6 +1793,8 @@ static void rcu_gp_cleanup(void)
  */
 static int __noreturn rcu_gp_kthread(void *unused)
 {
+	int timeout = 0;
+
 	rcu_bind_gp_kthread();
 	for (;;) {
 
@@ -1790,9 +1804,13 @@ static int __noreturn rcu_gp_kthread(void *unused)
 					       READ_ONCE(rcu_state.gp_seq),
 					       TPS("reqwait"));
 			rcu_state.gp_state = RCU_GP_WAIT_GPS;
-			swait_event_idle_exclusive(rcu_state.gp_wq,
+			timeout = swait_event_idle_timeout_exclusive(rcu_state.gp_wq,
 					 READ_ONCE(rcu_state.gp_flags) &
-					 RCU_GP_FLAG_INIT);
+					 RCU_GP_FLAG_INIT, 100 * HZ);
+
+			if (timeout == 0)
+				pr_err("[%s] wake up due to timeout\n", __func__);
+
 			rcu_state.gp_state = RCU_GP_DONE_GPS;
 			/* Locking provides needed memory barrier. */
 			if (rcu_gp_init())
@@ -2210,7 +2228,7 @@ static void rcu_do_batch(struct rcu_data *rdp)
 	/* Reset ->qlen_last_fqs_check trigger if enough CBs have drained. */
 	if (count == 0 && rdp->qlen_last_fqs_check != 0) {
 		rdp->qlen_last_fqs_check = 0;
-		rdp->n_force_qs_snap = READ_ONCE(rcu_state.n_force_qs);
+		rdp->n_force_qs_snap = rcu_state.n_force_qs;
 	} else if (count < rdp->qlen_last_fqs_check - qhimark)
 		rdp->qlen_last_fqs_check = count;
 
@@ -2538,10 +2556,10 @@ static void __call_rcu_core(struct rcu_data *rdp, struct rcu_head *head,
 		} else {
 			/* Give the grace period a kick. */
 			rdp->blimit = DEFAULT_MAX_RCU_BLIMIT;
-			if (READ_ONCE(rcu_state.n_force_qs) == rdp->n_force_qs_snap &&
+			if (rcu_state.n_force_qs == rdp->n_force_qs_snap &&
 			    rcu_segcblist_first_pend_cb(&rdp->cblist) != head)
 				rcu_force_quiescent_state();
-			rdp->n_force_qs_snap = READ_ONCE(rcu_state.n_force_qs);
+			rdp->n_force_qs_snap = rcu_state.n_force_qs;
 			rdp->qlen_last_fqs_check = rcu_segcblist_n_cbs(&rdp->cblist);
 		}
 	}
@@ -3032,7 +3050,7 @@ int rcutree_prepare_cpu(unsigned int cpu)
 	/* Set up local state, ensuring consistent view of global state. */
 	raw_spin_lock_irqsave_rcu_node(rnp, flags);
 	rdp->qlen_last_fqs_check = 0;
-	rdp->n_force_qs_snap = READ_ONCE(rcu_state.n_force_qs);
+	rdp->n_force_qs_snap = rcu_state.n_force_qs;
 	rdp->blimit = blimit;
 	if (rcu_segcblist_empty(&rdp->cblist) && /* No early-boot CBs? */
 	    !rcu_segcblist_is_offloaded(&rdp->cblist))

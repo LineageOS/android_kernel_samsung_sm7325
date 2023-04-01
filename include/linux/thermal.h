@@ -18,6 +18,16 @@
 #include <linux/workqueue.h>
 #include <uapi/linux/thermal.h>
 
+#if IS_ENABLED(CONFIG_SEC_PM)
+#include <linux/ipc_logging.h>
+extern void *thermal_ipc_log;
+#define THERMAL_IPC_LOG(msg, ...)						\
+	do {								\
+		if (thermal_ipc_log)					\
+			ipc_log_string(thermal_ipc_log, msg, ##__VA_ARGS__);	\
+	} while (0)
+#endif
+
 #define THERMAL_TRIPS_NONE	-1
 #define THERMAL_MAX_TRIPS	12
 
@@ -514,13 +524,12 @@ static inline void thermal_zone_device_update(struct thermal_zone_device *tz,
 static inline void thermal_zone_set_trips(struct thermal_zone_device *tz)
 { }
 static inline struct thermal_cooling_device *
-thermal_cooling_device_register(const char *type, void *devdata,
+thermal_cooling_device_register(char *type, void *devdata,
 	const struct thermal_cooling_device_ops *ops)
 { return ERR_PTR(-ENODEV); }
 static inline struct thermal_cooling_device *
 thermal_of_cooling_device_register(struct device_node *np,
-	const char *type, void *devdata,
-	const struct thermal_cooling_device_ops *ops)
+	char *type, void *devdata, const struct thermal_cooling_device_ops *ops)
 { return ERR_PTR(-ENODEV); }
 static inline struct thermal_cooling_device *
 devm_thermal_of_cooling_device_register(struct device *dev,

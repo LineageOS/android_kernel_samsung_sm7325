@@ -3133,9 +3133,6 @@ static void sit_add_v4_addrs(struct inet6_dev *idev)
 	memcpy(&addr.s6_addr32[3], idev->dev->dev_addr, 4);
 
 	if (idev->dev->flags&IFF_POINTOPOINT) {
-		if (idev->cnf.addr_gen_mode == IN6_ADDR_GEN_MODE_NONE)
-			return;
-
 		addr.s6_addr32[0] = htonl(0xfe800000);
 		scope = IFA_LINK;
 		plen = 64;
@@ -4146,6 +4143,15 @@ static void addrconf_dad_work(struct work_struct *w)
 	}
 
 	ifp->dad_probes--;
+	if (!strcmp(ifp->idev->dev->name, "aware_data0")) {
+		pr_info("Reduce waing time from %lu to %lu (HZ=%lu) to send NS for quick transmission for %s\n",
+			NEIGH_VAR(ifp->idev->nd_parms, RETRANS_TIME),
+			NEIGH_VAR(ifp->idev->nd_parms, RETRANS_TIME)/10,
+			HZ,
+			ifp->idev->dev->name);
+		addrconf_mod_dad_work(ifp,
+					NEIGH_VAR(ifp->idev->nd_parms, RETRANS_TIME)/10);
+	} else
 	addrconf_mod_dad_work(ifp,
 			      NEIGH_VAR(ifp->idev->nd_parms, RETRANS_TIME));
 	spin_unlock(&ifp->lock);
