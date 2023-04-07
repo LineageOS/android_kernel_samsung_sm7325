@@ -478,12 +478,12 @@ CONFIG_TLB_CONF_HANDLER=y
 #
 # Hypervisor
 #
-CONFIG_UH=y
-CONFIG_RKP=y
+# CONFIG_UH is not set
+# CONFIG_RKP is not set
 # CONFIG_RKP_FIMC_CHECK is not set
-CONFIG_KDP=y
-CONFIG_KDP_CRED=y
-CONFIG_KDP_NS=y
+# CONFIG_KDP is not set
+# CONFIG_KDP_CRED is not set
+# CONFIG_KDP_NS is not set
 # end of Hypervisor
 
 #
@@ -1379,7 +1379,7 @@ CONFIG_QRTR_MHI=y
 CONFIG_QRTR_HAVEN=y
 # CONFIG_QRTR_WS_DEBUG is not set
 # CONFIG_NET_NCSI is not set
-CONFIG_KNOX_NCM=y
+# CONFIG_KNOX_NCM is not set
 CONFIG_RPS=y
 CONFIG_RFS_ACCEL=y
 CONFIG_XPS=y
