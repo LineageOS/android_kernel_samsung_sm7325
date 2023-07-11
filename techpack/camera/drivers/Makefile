@@ -1,27 +1,5 @@
 # SPDX-License-Identifier: GPL-2.0-only
 
-#sensor header path for adaptive mipi
-ifeq ($(CONFIG_SEC_M52XQ_PROJECT), y)
-SRC_WIDE_FILES = $(srctree)/techpack/camera/drivers/cam_sensor_module/cam_sensor/adaptive_mipi/cam_sensor_adaptive_mipi_s5kgw3.h
-SRC_UW_FILES = $(srctree)/techpack/camera/drivers/cam_sensor_module/cam_sensor/adaptive_mipi/cam_sensor_adaptive_mipi_imx258.h
-else ifeq ($(CONFIG_SEC_A52SXQ_PROJECT), y)
-SRC_WIDE_FILES = $(srctree)/techpack/camera/drivers/cam_sensor_module/cam_sensor/adaptive_mipi/cam_sensor_adaptive_mipi_imx682.h
-SRC_UW_FILES = $(srctree)/techpack/camera/drivers/cam_sensor_module/cam_sensor/adaptive_mipi/cam_sensor_adaptive_mipi_imx258.h
-else ifeq ($(CONFIG_SEC_A73XQ_PROJECT), y)
-SRC_WIDE_FILES = $(srctree)/techpack/camera/drivers/cam_sensor_module/cam_sensor/adaptive_mipi/cam_sensor_adaptive_mipi_s5khm6.h
-SRC_UW_FILES = $(srctree)/techpack/camera/drivers/cam_sensor_module/cam_sensor/adaptive_mipi/cam_sensor_adaptive_mipi_imx258.h
-SRC_UW_DUALIZATION_FILES = $(srctree)/techpack/camera/drivers/cam_sensor_module/cam_sensor/adaptive_mipi/cam_sensor_adaptive_mipi_hi1336.h
-endif
-
-DST_WIDE_FILES = $(srctree)/techpack/camera/drivers/cam_sensor_module/cam_sensor/cam_sensor_adaptive_mipi_wide.h
-DST_UW_FILES = $(srctree)/techpack/camera/drivers/cam_sensor_module/cam_sensor/cam_sensor_adaptive_mipi_uw.h
-DST_UW_DUALIZATION_FILES = $(srctree)/techpack/camera/drivers/cam_sensor_module/cam_sensor/cam_sensor_adaptive_mipi_uw_dual.h
-
-#Copy sensor header for adaptive mipi
-$(info camera_adaptive_mipi="$(shell cp -f $(SRC_WIDE_FILES) $(DST_WIDE_FILES))")
-$(info camera_adaptive_mipi="$(shell cp -f $(SRC_UW_FILES) $(DST_UW_FILES))")
-$(info camera_adaptive_mipi="$(shell cp -f $(SRC_UW_DUALIZATION_FILES) $(DST_UW_DUALIZATION_FILES))")
-
 cameratree := $(srctree)/techpack/camera/drivers
 
 cam_include_dirs := $(shell dirname `find $(cameratree) -name '*.h'` | uniq)
