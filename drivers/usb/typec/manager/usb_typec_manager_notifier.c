@@ -21,7 +21,11 @@
 #include <linux/usb/typec/common/pdic_core.h>
 #include <linux/usb/typec/common/pdic_notifier.h>
 #include <linux/usb/typec/common/pdic_param.h>
+#if defined(CONFIG_SEC_A73XQ_PROJECT)
+#include <linux/muic/common/muic_notifier_a73xq.h>
+#else
 #include <linux/muic/common/muic_notifier.h>
+#endif
 #include <linux/power_supply.h>
 #if IS_MODULE(CONFIG_BATTERY_SAMSUNG) || IS_MODULE(CONFIG_BATTERY_SAMSUNG_MODULE)
 #include <linux/battery/sec_battery_common.h>

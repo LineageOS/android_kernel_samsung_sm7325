@@ -405,6 +405,8 @@ struct sec_vote *find_vote(const char *name)
 	}
 	return NULL;
 }
+EXPORT_SYMBOL(find_vote);
+
 struct sec_vote *sec_vote_init(const char *name, int type, int num, int init_val,
 		const char **voter_name, int(*cb)(void *data, int value), void *data)
 {
@@ -533,6 +535,11 @@ void _sec_vote(struct sec_vote *vote, int event, int en, int value, const char *
 	mutex_lock(&vote->lock);
 	pr_debug("%s, %s en: %d->%d, v: %d->%d\n", vote->name,vote->voter_name[event],
 		vote->voter[event].enable, en, vote->voter[event].value, value);
+
+	if ((vote->voter[event].enable == en) &&
+		(((vote->voter[event].value == value) || !en)))
+		goto out;
+
 	vote->voter[event].enable = en;
 	vote->voter[event].value = value;
 
@@ -540,18 +547,21 @@ void _sec_vote(struct sec_vote *vote, int event, int en, int value, const char *
 	if (ret < 0)
 			goto out;
 
+	pr_info("%s(%s:%d): %s (%s, %d) -> (%s, %d)\n", __func__, fname, line, vote->name,
+		(vote->id >= 0) ? vote->voter_name[vote->id] : none_str, vote->res,
+		(id >= 0) ? vote->voter_name[id] : none_str, res);
+
 	if (res != vote->res) {
-		pr_info("%s(%s:%d): %s (%s, %d) -> (%s, %d)\n", __func__, fname, line, vote->name,
-				(vote->id >= 0) ? vote->voter_name[vote->id] : none_str, vote->res,
-				(id >= 0) ? vote->voter_name[id] : none_str, res);
 		vote->id = id;
 		vote->res = res;
 		if (vote->force_set)
 			pr_err("%s skip by force_set\n", __func__);
 		else
 			vote->res = vote->cb(vote->data, res);
-	} else if (!en && (vote->id == event))
+	} else if (!en && (vote->id == event)) {
 		vote->id = id;
+	}
+
 out:
 	mutex_unlock(&vote->lock);
 }

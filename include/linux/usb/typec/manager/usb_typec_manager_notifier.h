@@ -22,8 +22,13 @@
 #ifndef __USB_TYPEC_MANAGER_NOTIFIER_H__
 #define __USB_TYPEC_MANAGER_NOTIFIER_H__
 
+#if defined (CONFIG_SEC_A73XQ_PROJECT)
+#include <linux/muic/common/muic_a73xq.h>
+#include <linux/muic/common/muic_notifier_a73xq.h>
+#else
 #include <linux/muic/common/muic.h>
 #include <linux/muic/common/muic_notifier.h>
+#endif
 #if IS_ENABLED(CONFIG_VBUS_NOTIFIER)
 #include <linux/vbus_notifier.h>
 #endif

@@ -124,6 +124,38 @@ config BATTERY_AGE_FORECAST
 	  it include some charging scenario for aged batteries.
 	  it need age forecast charging tables.
 
+config BATTERY_AGE_FORECAST_DETACHABLE
+	tristate "battery age forecast for detachable"
+	default n
+	select BATTERY_AGE_FORECAST
+	help
+	  Say Y here to enable
+	  support AGE FORECAST functions for detachable model.
+	  it include some charging scenario for aged batteries.
+	  it need age forecast charging tables.
+
+config BATTERY_AGE_FORECAST_B2B
+	tristate "battery age forecast for B2B"
+	default n
+	depends on BATTERY_AGE_FORECAST
+	help
+	  Say Y here to enable
+	  support AGE FORECAST functions for B2B.
+	  it include some charging scenario for aged batteries.
+	  it need age forecast charging tables.
+
+config BATTERY_LOGGING
+	bool "battery logging"
+	default n
+	depends on BATTERY_SAMSUNG
+	help
+	  Say Y to enable
+	  support for the battery logging feature which
+	  allows of logging battery related information
+	  during power on and power-off charging. As well
+	  as battery dump mechanism for periodically logging
+	  in an external file.
+
 config ENG_BATTERY_CONCEPT
 	bool "enable temp block"
 	default n
@@ -194,6 +226,15 @@ config SUPPORT_HV_CTRL
 	  support for controlling voltage
 	  If this is N in models,
 	  not support to control voltage.
+
+config NO_BATTERY
+	bool "support for no battery"
+	default n
+	help
+	  Say Y here to enable
+	  support for no battery models to turn off charging
+	  If this is N in models,
+	  not support to no battery.
 
 config SEC_BATTERY_TEST
 	bool "KUnit test for sec_battery_test"
@@ -302,4 +343,23 @@ config SEC_BATTERY_MISC_TEST
 	  support to kunit test.
 	  for kunitest
           for sec_pd_test
+
+config USB_FACTORY_MODE
+	bool "enable USB factory mode"
+	default n
+	help
+	  Say Y to enable CONFIG_USB_FACTORY_MODE
+	  This feature is used for models that support
+	  factory mode using USB cable instead of Anyway JIG.
+	  Code for this is added in charger and battery driver.
+
+config BATTERY_SAMSUNG_REBOOT
+	bool "support for check sec_reboot"
+	default n
+	help
+	 Say Y here,
+	 to support for check sec_reboot.
+	 This options for only ARCH_EXYNOS.
+	 If this is Y, checking reboot when power off.
+
 endmenu

@@ -19,8 +19,13 @@
 #include <linux/usb/typec/common/pdic_notifier.h>
 #endif
 #if defined(CONFIG_MUIC_NOTIFIER)
+#if defined (CONFIG_SEC_A73XQ_PROJECT)
+#include <linux/muic/common/muic_a73xq.h>
+#include <linux/muic/common/muic_notifier_a73xq.h>
+#else
 #include <linux/muic/common/muic.h>
 #include <linux/muic/common/muic_notifier.h>
+#endif
 #endif
 #if IS_ENABLED(CONFIG_VBUS_NOTIFIER)
 #include <linux/vbus_notifier.h>

@@ -34,6 +34,8 @@
 #include <linux/pm_wakeup.h>
 #include <linux/battery/sec_battery_common.h>
 #include <dt-bindings/battery/sec-battery.h>
+#include "sec_battery_vote.h"
+#include "sec_charging_modprobe.h"
 
 /* definitions */
 #define SEC_BATTERY_CABLE_HV_WIRELESS_ETX	100
@@ -46,6 +48,25 @@
 #define MFC_LDO_OFF		0
 
 #define TX_ID_CHECK_CNT		3
+#define MISALIGN_TX_TRY_CNT	3
+
+#if IS_ENABLED(CONFIG_USB_FACTORY_MODE)
+#define FOREACH_BOOT_MODE(GEN_BOOT_MODE) \
+	GEN_BOOT_MODE(NO_MODE) \
+	GEN_BOOT_MODE(OB_MODE) \
+	GEN_BOOT_MODE(IB_MODE)
+
+#define GENERATE_BOOT_MODE_ENUM(ENUM) ENUM,
+#define GENERATE_BOOT_MODE_STRING(STRING) #STRING,
+
+enum BOOT_MODE_ENUM {
+	FOREACH_BOOT_MODE(GENERATE_BOOT_MODE_ENUM)
+};
+
+static const char * const BOOT_MODE_STRING[] = {
+	FOREACH_BOOT_MODE(GENERATE_BOOT_MODE_STRING)
+};
+#endif
 
 enum battery_thermal_zone {
 	BAT_THERMAL_COLD = 0,
@@ -56,6 +77,12 @@ enum battery_thermal_zone {
 	BAT_THERMAL_WARM,
 	BAT_THERMAL_OVERHEAT,
 	BAT_THERMAL_OVERHEATLIMIT,
+};
+
+enum sb_wireless_mode {
+	SB_WRL_NONE = 0,
+	SB_WRL_RX_MODE = 1,
+	SB_WRL_TX_MODE = 2,
 };
 
 enum rx_device_type {
@@ -94,6 +121,7 @@ enum sec_battery_voltage_type {
 enum sec_battery_dual_mode {
 	SEC_DUAL_BATTERY_MAIN = 0,
 	SEC_DUAL_BATTERY_SUB,
+	SEC_DUAL_BATTERY_TOTAL,
 };
 #endif
 
@@ -116,6 +144,8 @@ enum sec_battery_capacity_mode {
 	SEC_BATTERY_CAPACITY_QH,
 	/* vfsoc */
 	SEC_BATTERY_CAPACITY_VFSOC,
+	/* rcomp0 */
+	SEC_BATTERY_CAPACITY_RC0,
 };
 
 enum sec_wireless_info_mode {
@@ -153,41 +183,6 @@ enum sec_wireless_auth_mode {
 	WIRELESS_AUTH_PASS,
 };
 
-enum sec_wireless_rx_control_mode {
-	WIRELESS_PAD_FAN_OFF = 0,
-	WIRELESS_PAD_FAN_ON,
-	WIRELESS_PAD_LED_OFF,
-	WIRELESS_PAD_LED_ON,
-	WIRELESS_PAD_LED_DIMMING,
-	WIRELESS_VRECT_ADJ_ON,
-	WIRELESS_VRECT_ADJ_OFF,
-	WIRELESS_VRECT_ADJ_ROOM_0,
-	WIRELESS_VRECT_ADJ_ROOM_1,
-	WIRELESS_VRECT_ADJ_ROOM_2,
-	WIRELESS_VRECT_ADJ_ROOM_3,
-	WIRELESS_VRECT_ADJ_ROOM_4,
-	WIRELESS_VRECT_ADJ_ROOM_5,
-	WIRELESS_CLAMP_ENABLE,
-	WIRELESS_SLEEP_MODE_ENABLE,
-	WIRELESS_SLEEP_MODE_DISABLE,
-};
-
-enum sec_wireless_tx_vout {
-	WC_TX_VOUT_OFF = 0,
-	WC_TX_VOUT_5000MV = 5000,
-	WC_TX_VOUT_5500MV = 5500,
-	WC_TX_VOUT_6000MV = 6000,
-	WC_TX_VOUT_6500MV = 6500,
-	WC_TX_VOUT_7000MV = 7000,
-	WC_TX_VOUT_7500MV = 7500,
-	WC_TX_VOUT_8000MV = 8000,
-	WC_TX_VOUT_8500MV = 8500,
-	WC_TX_VOUT_9000MV = 9000,
-	WC_TX_VOUT_MIN = WC_TX_VOUT_5000MV,
-	WC_TX_VOUT_MAX = WC_TX_VOUT_9000MV,
-	WC_TX_VOUT_STEP_AOV = 500,
-};
-
 enum sec_wireless_pad_id {
 	WC_PAD_ID_UNKNOWN	= 0x00,
 	/* 0x01~1F : Single Port */
@@ -220,7 +215,7 @@ enum sec_wireless_pad_id {
 
 enum sec_battery_adc_channel {
 	SEC_BAT_ADC_CHANNEL_CABLE_CHECK = 0,
-	SEC_BAT_ADC_CHANNEL_BAT_CHECK,
+	SEC_BAT_ADC_CHANNEL_BATID_CHECK,
 	SEC_BAT_ADC_CHANNEL_TEMP,
 	SEC_BAT_ADC_CHANNEL_TEMP_AMBIENT,
 	SEC_BAT_ADC_CHANNEL_FULL_CHECK,
@@ -240,8 +235,8 @@ enum sec_battery_adc_channel {
 enum sec_battery_charge_mode {
 	SEC_BAT_CHG_MODE_BUCK_OFF = 0, /* buck, chg off */
 	SEC_BAT_CHG_MODE_CHARGING_OFF,
+	SEC_BAT_CHG_MODE_PASS_THROUGH,
 	SEC_BAT_CHG_MODE_CHARGING, /* buck, chg on */
-//	SEC_BAT_CHG_MODE_BUCK_ON,
 	SEC_BAT_CHG_MODE_OTG_ON,
 	SEC_BAT_CHG_MODE_OTG_OFF,
 	SEC_BAT_CHG_MODE_UNO_ON,
@@ -287,6 +282,10 @@ enum sec_battery_direct_charging_source_ctrl {
 	SEC_STORE_MODE = 0x4,
 };
 
+extern const char *sb_rx_type_str(int type);
+extern const char *sb_vout_ctr_mode_str(int vout_mode);
+extern const char *sb_rx_vout_str(int vout);
+
 /* tx_event */
 #define BATT_TX_EVENT_WIRELESS_TX_STATUS		0x00000001
 #define BATT_TX_EVENT_WIRELESS_RX_CONNECT		0x00000002
@@ -324,6 +323,7 @@ enum sec_battery_direct_charging_source_ctrl {
 #define SEC_BAT_TX_RETRY_HIGH_TEMP		0x0010
 #define SEC_BAT_TX_RETRY_LOW_TEMP		0x0020
 #define SEC_BAT_TX_RETRY_OCP			0x0040
+#define SEC_BAT_TX_RETRY_AC_MISSING		0x0080
 
 /* ext_event */
 #define BATT_EXT_EVENT_NONE			0x00000000
@@ -363,7 +363,23 @@ enum tx_switch_mode_state {
 	TX_SWITCH_MODE_OFF = 0,
 	TX_SWITCH_CHG_ONLY,
 	TX_SWITCH_UNO_ONLY,
-	TX_SWITCH_UNO_FOR_GEAR,
+	TX_SWITCH_GEAR_PPS, /* temporary mode */
+};
+
+enum d2d_auth_type {
+	D2D_AUTH_NONE = 0,
+	D2D_AUTH_SRC,
+	D2D_AUTH_SNK,
+};
+
+enum d2d_mode {
+	HP_D2D_NONE = 0,
+	HP_D2D_ON,
+	HP_D2D_BATT_TMP,
+	HP_D2D_LRP_TMP,
+	HP_D2D_OCP,
+	HP_D2D_SOC,
+	HP_D2D_LCD,
 };
 
 /* full check condition type (can be used overlapped) */
@@ -435,6 +451,8 @@ enum sec_battery_check {
 
 #define SEC_FUELGAUGE_CAPACITY_TYPE_LOST_SOC	0x40
 
+#define SEC_FUELGAUGE_CAPACITY_TYPE_REPCAP	0x80
+
 /* charger function settings (can be used overlapped) */
 #define sec_charger_functions_t unsigned int
 /* SEC_CHARGER_NO_GRADUAL_CHARGING_CURRENT
@@ -455,6 +473,9 @@ typedef struct sec_age_data {
 	unsigned int recharge_condition_vcell;
 	unsigned int full_condition_vcell;
 	unsigned int full_condition_soc;
+#if defined(CONFIG_BATTERY_AGE_FORECAST_B2B)
+	unsigned int max_charging_current;
+#endif
 } sec_age_data_t;
 #endif
 
@@ -521,6 +542,7 @@ typedef struct {
 	cable_type == SEC_BATTERY_CABLE_9V_ERR || \
 	cable_type == SEC_BATTERY_CABLE_9V_TA || \
 	cable_type == SEC_BATTERY_CABLE_9V_UNKNOWN || \
+	cable_type == SEC_BATTERY_CABLE_POGO_9V || \
 	cable_type == SEC_BATTERY_CABLE_QC20)
 
 #define is_hv_wire_12v_type(cable_type) ( \
@@ -558,4 +580,11 @@ typedef struct {
 	(cable_type == SEC_BATTERY_CABLE_PDIC || \
 	cable_type == SEC_BATTERY_CABLE_PDIC_APDO) && \
 	hv_pdo)
+
+#define is_pogo_wire_type(cable_type) ( \
+	cable_type == SEC_BATTERY_CABLE_POGO || \
+	cable_type == SEC_BATTERY_CABLE_POGO_9V)
+
+#define is_wcin_type(cable_type) ( \
+	is_pogo_wire_type(cable_type) || is_wireless_type(cable_type))
 #endif /* __SEC_CHARGING_COMMON_H */

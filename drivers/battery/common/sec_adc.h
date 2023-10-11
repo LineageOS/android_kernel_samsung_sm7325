@@ -27,6 +27,7 @@
 #define VENDOR_LSI 1
 #define VENDOR_QCOM 2
 #define RETRY_CNT 3
+#define FAKE_TEMP 300
 
 #endif /* __SEC_ADC_H */
 
