@@ -548,7 +548,10 @@ static ssize_t ear_detect_enable_store(struct device *dev,
 		return ret;
 
 	if (ts->plat_data->support_ear_detect) {
-		ts->plat_data->ed_enable = value;
+		if (ts->plat_data->power_state == SEC_INPUT_STATE_LPM)
+			ts->plat_data->ed_enable = value;
+		else
+			ts->plat_data->ed_enable = value != 0 ? 3 : 0;
 		ret = ts->stm_ts_write(ts, &address, 1, &ts->plat_data->ed_enable, 1);
 		input_info(true, &ts->client->dev, "%s: set ear detect %s, ret = %d\n",
 					__func__, ts->plat_data->ed_enable ? "enable" : "disable", ret);
