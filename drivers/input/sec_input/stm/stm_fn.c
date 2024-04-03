@@ -831,9 +831,10 @@ retry_pmode:
 			disable_irq_wake(ts->irq);
 	}
 
-	if (mode == TO_LOWPOWER_MODE)
+	if (mode == TO_LOWPOWER_MODE) {
+		ts->fod_pressed = 0;
 		ts->plat_data->power_state = SEC_INPUT_STATE_LPM;
-	else
+	} else
 		ts->plat_data->power_state = SEC_INPUT_STATE_POWER_ON;
 
 error:
