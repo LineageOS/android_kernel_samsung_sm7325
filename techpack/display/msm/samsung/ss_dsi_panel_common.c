@@ -3309,6 +3309,12 @@ int ss_panel_off_post(struct samsung_display_driver_data *vdd)
 
 	LCD_INFO(vdd, "+\n");
 
+	if (vdd->finger_mask)
+		vdd->finger_mask = 0;
+
+	if (vdd->br_info.common_br.finger_mask_bl_level)
+		vdd->br_info.common_br.finger_mask_bl_level = 0;
+
 	vdd->display_on = false;
 
 	if (vdd->mdnie.support_trans_dimming)
