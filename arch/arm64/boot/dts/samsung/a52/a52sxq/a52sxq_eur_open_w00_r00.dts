@@ -4940,7 +4940,6 @@
 				sec,area-size = <0x85 0x10a 0x155>;
 				sec,max_coords = <0x1000 0x1000>;
 				enable_settings_aot;
-				support_dex_mode;
 				support_fod;
 				support_fod_lp_mode;
 				support_mis_calibration_test;
