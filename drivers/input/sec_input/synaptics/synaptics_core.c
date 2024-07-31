@@ -695,6 +695,10 @@ void synaptics_ts_reinit(void *data)
 		input_err(true, &ts->client->dev, "%s: fail to detect protocol\n", __func__);
 */
 	/* synaptics_ts_set_up_app_fw(ts); */
+
+	if (ts->do_set_up_report)
+		synaptics_ts_set_up_report(ts);
+
 	synaptics_ts_rezero(ts);
 
 	input_info(true, &ts->client->dev,
@@ -1198,8 +1202,10 @@ static void synaptics_ts_parse_dt(struct device *dev, struct synaptics_ts_data *
 	}
 
 	ts->support_immediate_cmd = of_property_read_bool(np, "synaptics,support_immediate_cmd");
+	ts->do_set_up_report = of_property_read_bool(np, "synaptics,do_set_up_report");
 
-	input_info(true, dev, "%s: support_immediate_cmd:%d\n", __func__, ts->support_immediate_cmd);
+	input_info(true, dev, "%s: support_immediate_cmd:%d, do_set_up_report:%d\n",
+			__func__, ts->support_immediate_cmd, ts->do_set_up_report);
 }
 
 static int synaptics_ts_init(struct i2c_client *client)
@@ -1364,6 +1370,7 @@ static int synaptics_ts_init(struct i2c_client *client)
 	dump_callbacks.inform_dump = synaptics_ts_dump_tsp_log;
 	INIT_DELAYED_WORK(&ts->check_rawdata, synaptics_ts_check_rawdata);
 #endif
+
 	input_info(true, &client->dev, "%s: init resource\n", __func__);
 
 	return 0;
@@ -1463,6 +1470,7 @@ int synaptics_ts_probe(struct i2c_client *client, const struct i2c_device_id *id
 	ts->plat_data->enabled = true;
 
 	input_err(true, &ts->client->dev, "%s: done\n", __func__);
+
 	input_log_fix();
 
 	if (!ts->plat_data->shutdown_called)
@@ -1566,4 +1574,3 @@ module_i2c_driver(synaptics_ts_driver);
 MODULE_SOFTDEP("pre: acpm-mfd-bus");
 MODULE_DESCRIPTION("synaptics TouchScreen driver");
 MODULE_LICENSE("GPL");
-

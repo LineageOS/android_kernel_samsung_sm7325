@@ -29,7 +29,7 @@
 #include "linux/usb/typec/slsi/s2mu106/usbpd-s2mu106.h"
 #include <linux/time64.h>
 #endif
-#include "../../common/sec_charging_common.h"
+#include "../../common/a73xq/sec_charging_common.h"
 
 #define S2MU106_PM_VALUP1	0x03
 #define S2MU106_PM_VALUP2	0x04

@@ -117,4 +117,3 @@ EXPORT_SYMBOL(synaptics_ts_sponge_dump_flush);
 
 MODULE_LICENSE("GPL");
 
-

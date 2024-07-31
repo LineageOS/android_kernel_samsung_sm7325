@@ -554,4 +554,3 @@ enum tcm_test_code {
 #define SYNAPTICS_TS_SPONGE_DUMP_1			0x01
 
 #endif
-

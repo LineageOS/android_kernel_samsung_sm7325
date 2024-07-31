@@ -23,9 +23,14 @@
 #include <linux/sti/abc_kunit.h>
 #endif
 
-__visible_for_testing struct device *abc_hub_dev;
+__visible_for_testing
+struct device *abc_hub_dev;
 EXPORT_SYMBOL_KUNIT(abc_hub_dev);
-static int abc_hub_probed;
+struct abc_hub_info *abc_hub_pinfo;
+EXPORT_SYMBOL_KUNIT(abc_hub_pinfo);
+__visible_for_testing
+int abc_hub_probed;
+EXPORT_SYMBOL_KUNIT(abc_hub_probed);
 
 #if IS_ENABLED(CONFIG_OF)
 static int abc_hub_parse_dt(struct device *dev)
@@ -33,7 +38,7 @@ static int abc_hub_parse_dt(struct device *dev)
 	struct abc_hub_platform_data *pdata = dev->platform_data;
 	struct device_node *np;
 #if IS_ENABLED(CONFIG_SEC_ABC_HUB_COND)
-	struct device_node *cond_np;
+	int cond_pin_cnt = 0;
 #endif
 
 	np = dev->of_node;
@@ -44,17 +49,21 @@ static int abc_hub_parse_dt(struct device *dev)
 	}
 
 #if IS_ENABLED(CONFIG_SEC_ABC_HUB_COND)
-	cond_np = of_find_node_by_name(np, "cond");
-	if (cond_np) {
-		if (parse_cond_data(dev, pdata, cond_np) < 0)
-			dev_info(dev, "sub module(cond) is not supported\n");
-		else
-			pdata->cond.init = 1;
+	cond_pin_cnt = of_gpio_named_count(np, "sec,det_conn_gpios");
+#if IS_ENABLED(CONFIG_QCOM_SEC_ABC_DETECT)
+	/* Setting PM gpio for QC */
+	cond_pin_cnt = cond_pin_cnt + of_gpio_named_count(np, "sec,det_pm_conn_gpios");
+#endif
+	if (cond_pin_cnt) {
+		pdata->cond.init = 1;
+	} else {
+		pdata->cond.init = 0;
+		ABC_PRINT("sub module(cond) is not supported\n");
 	}
 #endif
 #if IS_ENABLED(CONFIG_SEC_ABC_HUB_BOOTC)
 	if (parse_bootc_data(dev, pdata, np) < 0)
-		dev_info(dev, "sub module(bootc) is not supported\n");
+		ABC_PRINT("sub module(bootc) is not supported\n");
 	else
 		pdata->bootc_pdata.init = 1;
 #endif
@@ -72,24 +81,12 @@ static const struct of_device_id abc_hub_dt_match[] = {
 static int abc_hub_suspend(struct device *dev)
 {
 	int ret = 0;
-#if IS_ENABLED(CONFIG_SEC_ABC_HUB_COND)
-	struct abc_hub_info *pinfo = dev_get_drvdata(dev);
-
-	if (pinfo->pdata->cond.init)
-		ret = abc_hub_cond_suspend(dev);
-#endif
 	return ret;
 }
 
 static int abc_hub_resume(struct device *dev)
 {
 	int ret = 0;
-#if IS_ENABLED(CONFIG_SEC_ABC_HUB_COND)
-	struct abc_hub_info *pinfo = dev_get_drvdata(dev);
-
-	if (pinfo->pdata->cond.init)
-		ret = abc_hub_cond_resume(dev);
-#endif
 	return ret;
 }
 
@@ -103,60 +100,60 @@ static const struct dev_pm_ops abc_hub_pm = {
 	.resume = abc_hub_resume,
 };
 
-__visible_for_testing ssize_t store_abc_hub_enable(struct device *dev,
-					struct device_attribute *attr,
-					const char *buf, size_t count)
+__visible_for_testing
+ssize_t enable_store(struct device *dev,
+										   struct device_attribute *attr,
+										   const char *buf, size_t count)
 {
-	struct abc_hub_info *pinfo = dev_get_drvdata(dev);
-
 	/* The enabel will be managed for each sub module when sub module becomes over two. */
 	if (!strncmp(buf, "1", 1)) {
-		dev_info(dev, "abc_hub driver enabled.\n");
+		ABC_PRINT("abc_hub driver enabled.\n");
 
 		if (sec_abc_wait_enabled() < 0)
-			dev_err(dev, "abc driver is not enabled\n");
+			ABC_PRINT("abc driver is not enabled\n");
 
-		pinfo->enabled = ABC_HUB_ENABLED;
-#if IS_ENABLED(CONFIG_SEC_ABC_HUB_COND)
-		if (pinfo->pdata->cond.init)
-			abc_hub_cond_enable(dev, pinfo->enabled);
+		abc_hub_pinfo->enabled = ABC_HUB_ENABLED;
+#if IS_ENABLED(CONFIG_SEC_ABC_HUB_COND) && !IS_ENABLED(CONFIG_SEC_FACTORY)
+		if (abc_hub_pinfo->pdata->cond.init)
+			abc_hub_cond_enable(dev, abc_hub_pinfo->enabled);
 #endif
 #if IS_ENABLED(CONFIG_SEC_ABC_HUB_BOOTC)
-		if (pinfo->pdata->bootc_pdata.init)
-			abc_hub_bootc_enable(dev, pinfo->enabled);
+		if (abc_hub_pinfo->pdata->bootc_pdata.init)
+			abc_hub_bootc_enable(dev, abc_hub_pinfo->enabled);
 #endif
 	} else if (!strncmp(buf, "0", 1)) {
-		dev_info(dev, "abc_hub driver disabled.\n");
-		pinfo->enabled = ABC_HUB_DISABLED;
-#if IS_ENABLED(CONFIG_SEC_ABC_HUB_COND)
-		if (pinfo->pdata->cond.init)
-			abc_hub_cond_enable(dev, pinfo->enabled);
+		ABC_PRINT("abc_hub driver disabled.\n");
+		abc_hub_pinfo->enabled = ABC_HUB_DISABLED;
+#if IS_ENABLED(CONFIG_SEC_ABC_HUB_COND) && !IS_ENABLED(CONFIG_SEC_FACTORY)
+		if (abc_hub_pinfo->pdata->cond.init)
+			abc_hub_cond_enable(dev, abc_hub_pinfo->enabled);
 #endif
 #if IS_ENABLED(CONFIG_SEC_ABC_HUB_BOOTC)
-		if (pinfo->pdata->bootc_pdata.init)
-			abc_hub_bootc_enable(dev, pinfo->enabled);
+		if (abc_hub_pinfo->pdata->bootc_pdata.init)
+			abc_hub_bootc_enable(dev, abc_hub_pinfo->enabled);
 #endif
 	}
 	return count;
 }
-EXPORT_SYMBOL_KUNIT(store_abc_hub_enable);
+EXPORT_SYMBOL_KUNIT(enable_store);
 
-static ssize_t show_abc_hub_enable(struct device *dev,
-				   struct device_attribute *attr,
-				   char *buf)
+__visible_for_testing
+ssize_t enable_show(struct device *dev,
+										  struct device_attribute *attr,
+										  char *buf)
 {
-	struct abc_hub_info *pinfo = dev_get_drvdata(dev);
-
-	return sprintf(buf, "%d\n", pinfo->enabled);
+	return sprintf(buf, "%d\n", abc_hub_pinfo->enabled);
 }
-static DEVICE_ATTR(enable, 0644, show_abc_hub_enable, store_abc_hub_enable);
+EXPORT_SYMBOL_KUNIT(enable_show);
+
+static DEVICE_ATTR_RW(enable);
 
 #if IS_ENABLED(CONFIG_SEC_ABC_HUB_BOOTC)
-__visible_for_testing ssize_t store_abc_hub_bootc_offset(struct device *dev,
+__visible_for_testing
+ssize_t bootc_offset_store(struct device *dev,
 								struct device_attribute *attr,
 								const char *buf, size_t count)
 {
-	struct abc_hub_info *pinfo = dev_get_drvdata(dev);
 	char module[BOOTC_OFFSET_STR_MAX] = {0,};
 	char *cur;
 	char delim = ',';
@@ -164,7 +161,7 @@ __visible_for_testing ssize_t store_abc_hub_bootc_offset(struct device *dev,
 	int i = 0;
 
 	if (strlen(buf) >= BOOTC_OFFSET_STR_MAX || count >= (unsigned int)BOOTC_OFFSET_STR_MAX) {
-		pr_err("%s: buf length is over(MAX:%d)!!\n", __func__, BOOTC_OFFSET_STR_MAX);
+		ABC_PRINT("buf length is over(MAX:%d)!!\n", BOOTC_OFFSET_STR_MAX);
 		return count;
 	}
 
@@ -172,20 +169,20 @@ __visible_for_testing ssize_t store_abc_hub_bootc_offset(struct device *dev,
 	if (cur) {
 		memcpy(module, buf, cur - buf);
 		if (kstrtoint(cur + 1, 0, &offset)) {
-			pr_err("%s: failed to get offest\n", __func__);
+			ABC_PRINT("failed to get offest\n");
 			return count;
 		}
 	} else {
-		pr_err("%s: failed to get module\n", __func__);
+		ABC_PRINT("failed to get module\n");
 		return count;
 	}
 
-	pr_info("%s: module(%s), offset(%d)\n", __func__, module, offset);
+	ABC_PRINT("module(%s), offset(%d)\n", module, offset);
 
 	if (offset >= 0) {
 		for (i = 0; i < BOOTC_OFFSET_DATA_CNT; i++) {
-			if (strcmp(module, pinfo->pdata->bootc_pdata.offset_data[i].module) == 0) {
-				pinfo->pdata->bootc_pdata.offset_data[i].offset = offset;
+			if (strcmp(module, abc_hub_pinfo->pdata->bootc_pdata.offset_data[i].module) == 0) {
+				abc_hub_pinfo->pdata->bootc_pdata.offset_data[i].offset = offset;
 				break;
 			}
 		}
@@ -193,66 +190,66 @@ __visible_for_testing ssize_t store_abc_hub_bootc_offset(struct device *dev,
 
 	return count;
 }
-EXPORT_SYMBOL_KUNIT(store_abc_hub_bootc_offset);
+EXPORT_SYMBOL_KUNIT(bootc_offset_store);
 
-static ssize_t show_abc_hub_bootc_offset(struct device *dev,
-				   struct device_attribute *attr,
-				   char *buf)
+__visible_for_testing
+ssize_t bootc_offset_show(struct device *dev,
+						  struct device_attribute *attr,
+						  char *buf)
 {
-	struct abc_hub_info *pinfo = dev_get_drvdata(dev);
 	int res = 0;
 	int i;
 
 	for (i = 0; i < BOOTC_OFFSET_DATA_CNT; i++) {
-		res += sprintf(buf, "%s,%d\n", pinfo->pdata->bootc_pdata.offset_data[i].module,
-				pinfo->pdata->bootc_pdata.offset_data[i].offset);
+		res += sprintf(buf, "%s,%d\n", abc_hub_pinfo->pdata->bootc_pdata.offset_data[i].module,
+				abc_hub_pinfo->pdata->bootc_pdata.offset_data[i].offset);
 	}
 
 	return res;
 }
-static DEVICE_ATTR(bootc_offset, 0644, show_abc_hub_bootc_offset, store_abc_hub_bootc_offset);
+EXPORT_SYMBOL_KUNIT(bootc_offset_show);
 
-__visible_for_testing ssize_t store_abc_hub_bootc_time(struct device *dev,
-								struct device_attribute *attr,
-								const char *buf, size_t count)
+static DEVICE_ATTR_RW(bootc_offset);
+
+__visible_for_testing
+ssize_t bootc_time_store(struct device *dev,
+						 struct device_attribute *attr,
+						 const char *buf,
+						 size_t count)
 {
-	struct abc_hub_info *pinfo = dev_get_drvdata(dev);
-
-	if (kstrtoint(buf, 0, &(pinfo->pdata->bootc_pdata.bootc_time))) {
-		pr_err("%s: failed to get bootc_time\n", __func__);
-		pinfo->pdata->bootc_pdata.bootc_time = -1;
+	if (kstrtoint(buf, 0, &(abc_hub_pinfo->pdata->bootc_pdata.bootc_time))) {
+		ABC_PRINT("failed to get bootc_time\n");
+		abc_hub_pinfo->pdata->bootc_pdata.bootc_time = -1;
 		return count;
 	}
 
-	pr_info("%s: bootc_time(%d)\n", __func__, pinfo->pdata->bootc_pdata.bootc_time);
+	ABC_PRINT("bootc_time(%d)\n", abc_hub_pinfo->pdata->bootc_pdata.bootc_time);
 
 	return count;
 }
-EXPORT_SYMBOL_KUNIT(store_abc_hub_bootc_time);
+EXPORT_SYMBOL_KUNIT(bootc_time_store);
 
-static ssize_t show_abc_hub_bootc_time(struct device *dev,
-				   struct device_attribute *attr,
-				   char *buf)
+__visible_for_testing
+ssize_t bootc_time_show(struct device *dev,
+						struct device_attribute *attr,
+						char *buf)
 {
-	struct abc_hub_info *pinfo = dev_get_drvdata(dev);
-
-	int res = sprintf(buf, "%d\n", pinfo->pdata->bootc_pdata.bootc_time);
+	int res = sprintf(buf, "%d\n", abc_hub_pinfo->pdata->bootc_pdata.bootc_time);
 
 	return res;
 }
-static DEVICE_ATTR(bootc_time, 0644, show_abc_hub_bootc_time, store_abc_hub_bootc_time);
+EXPORT_SYMBOL_KUNIT(bootc_time_show);
+
+static DEVICE_ATTR_RW(bootc_time);
 #endif
 
 int abc_hub_get_enabled(void)
 {
-	struct abc_hub_info *pinfo;
 
 	if (!abc_hub_probed)
 		return 0;
 
-	pinfo = dev_get_drvdata(abc_hub_dev);
-
-	return pinfo->enabled;
+	return abc_hub_pinfo->enabled;
 }
 EXPORT_SYMBOL(abc_hub_get_enabled);
 
@@ -264,21 +261,19 @@ EXPORT_SYMBOL(abc_hub_get_enabled);
  */
 void abc_hub_send_event(char *str)
 {
-	struct abc_hub_info *pinfo;
 
 	if (!abc_hub_probed) {
-		dev_err(abc_hub_dev, "ABC Hub driver is not initialized!\n");
+		ABC_PRINT_KUNIT("ABC Hub driver is not initialized!\n");
 		return;
 	}
 
-	pinfo = dev_get_drvdata(abc_hub_dev);
-
-	if (pinfo->enabled == ABC_HUB_DISABLED) {
-		dev_info(abc_hub_dev, "ABC Hub is disabled!\n");
+	if (abc_hub_pinfo->enabled == ABC_HUB_DISABLED) {
+		ABC_PRINT_KUNIT("ABC Hub is disabled!\n");
 		return;
 	}
 #if IS_ENABLED(CONFIG_SEC_KUNIT)
-	abc_hub_test_get_uevent_str(str);
+	ABC_PRINT_KUNIT("%s", str);
+	return;
 #endif
 	/* It just sends event to abc driver. The function will be added for gathering hw param big data. */
 	sec_abc_send_event(str);
@@ -288,10 +283,9 @@ EXPORT_SYMBOL(abc_hub_send_event);
 static int abc_hub_probe(struct platform_device *pdev)
 {
 	struct abc_hub_platform_data *pdata;
-	struct abc_hub_info *pinfo;
 	int ret = 0;
 
-	dev_info(&pdev->dev, "%s\n", __func__);
+	ABC_PRINT("start");
 
 	abc_hub_probed = false;
 
@@ -312,7 +306,7 @@ static int abc_hub_probe(struct platform_device *pdev)
 			goto err_parse_dt;
 		}
 
-		pr_info("%s: parse dt done\n", __func__);
+		ABC_PRINT("parse dt done\n");
 	} else {
 		pdata = pdev->dev.platform_data;
 	}
@@ -323,57 +317,48 @@ static int abc_hub_probe(struct platform_device *pdev)
 		goto out;
 	}
 
-	pinfo = kzalloc(sizeof(*pinfo), GFP_KERNEL);
+	abc_hub_pinfo = kzalloc(sizeof(*abc_hub_pinfo), GFP_KERNEL);
 
-	if (!pinfo) {
+	if (!abc_hub_pinfo) {
 		ret = -ENOMEM;
-		goto err_alloc_pinfo;
+		goto err_alloc_abc_hub_pinfo;
 	}
 #if IS_ENABLED(CONFIG_DRV_SAMSUNG)
-	pinfo->dev = sec_device_create(pinfo, "sec_abc_hub");
+	abc_hub_pinfo->dev = sec_device_create(abc_hub_pinfo, "sec_abc_hub");
 #else
-	pinfo->dev = device_create(sec_class, NULL, 0, NULL, "sec_abc_hub");
+	abc_hub_pinfo->dev = device_create(sec_class, NULL, 0, NULL, "sec_abc_hub");
 #endif
-	if (IS_ERR(pinfo->dev)) {
-		pr_err("%s Failed to create device(sec_abc_hub)!\n", __func__);
+	if (IS_ERR(abc_hub_pinfo->dev)) {
+		ABC_PRINT("Failed to create device(sec_abc_hub)!\n");
 		ret = -ENODEV;
 		goto err_create_device;
 	}
-	abc_hub_dev = pinfo->dev;
+	abc_hub_dev = abc_hub_pinfo->dev;
 
-	ret = device_create_file(pinfo->dev, &dev_attr_enable);
+	ret = device_create_file(abc_hub_pinfo->dev, &dev_attr_enable);
 	if (ret) {
-		pr_err("%s: Failed to create device enabled file\n", __func__);
+		ABC_PRINT("Failed to create device enabled file\n");
 		ret = -ENODEV;
 		goto err_create_abc_hub_enable_sysfs;
 	}
 
 #if IS_ENABLED(CONFIG_SEC_ABC_HUB_BOOTC)
-	ret = device_create_file(pinfo->dev, &dev_attr_bootc_offset);
+	ret = device_create_file(abc_hub_pinfo->dev, &dev_attr_bootc_offset);
 	if (ret) {
-		pr_err("%s: Failed to create device bootc_offset file\n", __func__);
+		ABC_PRINT("Failed to create device bootc_offset file\n");
 		ret = -ENODEV;
 		goto err_create_abc_hub_bootc_offset_sysfs;
 	}
 
-	ret = device_create_file(pinfo->dev, &dev_attr_bootc_time);
+	ret = device_create_file(abc_hub_pinfo->dev, &dev_attr_bootc_time);
 	if (ret) {
-		pr_err("%s: Failed to create device bootc_time file\n", __func__);
+		ABC_PRINT("Failed to create device bootc_time file\n");
 		ret = -ENODEV;
 		goto err_create_abc_hub_bootc_time_sysfs;
 	}
 #endif
-	pinfo->pdata = pdata;
-	platform_set_drvdata(pdev, pinfo);
-
-#if IS_ENABLED(CONFIG_SEC_ABC_HUB_COND)
-	if (pdata->cond.init) {
-		if (abc_hub_cond_init(abc_hub_dev) < 0) {
-			dev_err(&pdev->dev, "abc_hub_cond_init fail\n");
-			pdata->cond.init = 0;
-		}
-	}
-#endif
+	abc_hub_pinfo->pdata = pdata;
+	platform_set_drvdata(pdev, abc_hub_pinfo);
 
 #if IS_ENABLED(CONFIG_SEC_ABC_HUB_BOOTC)
 	if (pdata->bootc_pdata.init) {
@@ -385,14 +370,14 @@ static int abc_hub_probe(struct platform_device *pdev)
 #endif
 
 	abc_hub_probed = true;
-	dev_info(&pdev->dev, "%s success!\n", __func__);
+	ABC_PRINT("Success");
 	return ret;
 
 #if IS_ENABLED(CONFIG_SEC_ABC_HUB_BOOTC)
 err_create_abc_hub_bootc_time_sysfs:
-	device_remove_file(pinfo->dev, &dev_attr_bootc_offset);
+	device_remove_file(abc_hub_pinfo->dev, &dev_attr_bootc_offset);
 err_create_abc_hub_bootc_offset_sysfs:
-	device_remove_file(pinfo->dev, &dev_attr_enable);
+	device_remove_file(abc_hub_pinfo->dev, &dev_attr_enable);
 #endif
 err_create_abc_hub_enable_sysfs:
 #if IS_ENABLED(CONFIG_DRV_SAMSUNG)
@@ -401,8 +386,8 @@ err_create_abc_hub_enable_sysfs:
 	device_destroy(sec_class, abc_hub_dev->devt);
 #endif
 err_create_device:
-	kfree(pinfo);
-err_alloc_pinfo:
+	kfree(abc_hub_pinfo);
+err_alloc_abc_hub_pinfo:
 err_parse_dt:
 	devm_kfree(&pdev->dev, pdata);
 	pdev->dev.platform_data =  NULL;
@@ -427,7 +412,8 @@ static struct platform_driver abc_hub_driver = {
 
 static int __init abc_hub_init(void)
 {
-	pr_info("%s\n", __func__);
+	ABC_PRINT("init");
+
 	return platform_driver_register(&abc_hub_driver);
 }
 

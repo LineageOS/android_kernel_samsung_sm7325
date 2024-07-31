@@ -2327,4 +2327,3 @@ void syna_cdev_remove_sysfs(struct synaptics_ts_data *ts)
 }
 
 
-

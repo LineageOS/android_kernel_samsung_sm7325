@@ -27,8 +27,7 @@ enum motto_event_module {
 
 #define MOTTO_MODULE_NAME_LEN	32
 #define MOTTO_BUFFER_MAX		256
-struct motto_event_type
-{
+struct motto_event_type {
 	enum motto_event_module module;
 	char motto_event_module_name[MOTTO_MODULE_NAME_LEN];
 	char motto_event_type_str[MOTTO_BUFFER_MAX];

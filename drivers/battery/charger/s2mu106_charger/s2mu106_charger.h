@@ -27,7 +27,7 @@
 #include <linux/muic/common/muic_notifier_a73xq.h>
 #endif /* CONFIG_MUIC_NOTIFIER */
 
-#include "../../common/sec_charging_common.h"
+#include "../../common/a73xq/sec_charging_common.h"
 
 enum {
 	CHIP_ID = 0,
@@ -295,7 +295,6 @@ ssize_t s2mu106_chg_store_attrs(struct device *dev,
 
 #define REDUCE_CURRENT_STEP         25
 #define MINIMUM_INPUT_CURRENT           300
-#define SLOW_CHARGING_CURRENT_STANDARD      400
 
 #define FAKE_BAT_LEVEL          50
 

@@ -37,13 +37,8 @@
 #include <linux/usb/typec/manager/usb_typec_manager_notifier.h>
 #else
 #if IS_ENABLED(CONFIG_MUIC_NOTIFIER)
-#if defined(CONFIG_SEC_A73XQ_PROJECT)
-#include <linux/muic/common/muic_a73xq.h>
-#include <linux/muic/common/muic_notifier_a73xq.h>
-#else
 #include <linux/muic/common/muic.h>
 #include <linux/muic/common/muic_notifier.h>
-#endif
 #endif
 #endif
 #include <linux/battery/sec_pd.h>

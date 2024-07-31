@@ -29,27 +29,13 @@
 
 /*********** sub module : cond ************/
 #if IS_ENABLED(CONFIG_SEC_ABC_HUB_COND)
-#define DET_CONN_MAX_NUM_GPIOS 32
-#define DET_CONN_GPIO_IRQ_NOT_INIT 0
-#define DET_CONN_GPIO_IRQ_ENABLED 1
-#define DET_CONN_GPIO_IRQ_DISABLED 2
 
 struct sub_cond_pdata {
 	// common
 	int init;
 	int enabled;
-	// custom
-	const char *name[DET_CONN_MAX_NUM_GPIOS];
-	int irq_gpio[DET_CONN_MAX_NUM_GPIOS];
-	int irq_num[DET_CONN_MAX_NUM_GPIOS];
-	unsigned int irq_type[DET_CONN_MAX_NUM_GPIOS];
-	int irq_enabled[DET_CONN_MAX_NUM_GPIOS];
-	int gpio_cnt;
-	int gpio_pm_cnt;
-	int gpio_total_cnt;
 };
 #endif
-
 /*********** sub module : bootc ************/
 #if IS_ENABLED(CONFIG_SEC_ABC_HUB_BOOTC)
 #define BOOTC_OFFSET_DATA_CNT 1
@@ -104,14 +90,7 @@ struct abc_hub_info {
 
 /*********** sub module : cond ************/
 #if IS_ENABLED(CONFIG_SEC_ABC_HUB_COND)
-int parse_cond_data(struct device *dev,
-		    struct abc_hub_platform_data *pdata,
-		    struct device_node *np);
-int abc_hub_cond_init(struct device *dev);
 void abc_hub_cond_enable(struct device *dev, int enable);
-
-int abc_hub_cond_suspend(struct device *dev);
-int abc_hub_cond_resume(struct device *dev);
 #endif
 
 /*********** sub module : bootc ************/
@@ -123,6 +102,7 @@ int abc_hub_bootc_init(struct device *dev);
 void abc_hub_bootc_enable(struct device *dev, int enable);
 #endif
 
+extern struct abc_hub_info *abc_hub_pinfo;
 /****************** Common *****************/
 void abc_hub_send_event(char *str);
 int abc_hub_get_enabled(void);

@@ -12,10 +12,20 @@ comment "Samsung ABC Common Options"
 config SEC_ABC_COMMON
 	tristate "Samsung ABC COMMON Feature"
 	depends on SEC_ABC
-	default y
+	default n
 	help
 	  Samsung ABC(Abnormal Behavior Catcher) Driver Common Feature
 	  This config is for ABC Driver Core Code
+	  It depends on SEC_ABC Feature
+
+comment "Samsung ABC Spec manager type1 options"
+config SEC_ABC_SPEC_TYPE1
+	tristate "Samsung ABC_SPEC_TYPE1 Feature"
+	depends on SEC_ABC
+	default n
+	help
+	  Samsung ABC(Abnormal Behavior Catcher)Driver's Spec manager type1 Feature
+	  It has logic and spec of judgment of error type1.
 	  It depends on SEC_ABC Feature
 
 comment "Samsung ABC MOTTO Options"
@@ -51,40 +61,17 @@ config SEC_ABC_HUB
 
 comment "Samsung ABC Hub Core Options"
 config SEC_ABC_HUB_CORE
-	bool "Samsung ABC Hub Core Feature"
+	tristate "Samsung ABC Hub Core Feature"
 	depends on SEC_ABC_HUB
-	default y
+	default n
 	help
 	  Samsung ABC(Abnormal Behavior Catcher) Hub Driver's Core Feature
 	  This function controls sub modules for supporting ABC Driver
 	  It depends on SEC_ABC_HUB Feature
 
-comment "Samsung ABC Hub Connect Detect Options"
-config SEC_ABC_HUB_COND
-	bool "Samsung ABC Hub Connect Detect Feature"
-	depends on SEC_ABC_HUB
-	depends on !SEC_FACTORY
-	default n
-	help
-	  Samsung COND(Connect Detect) Feature
-	  This function is to detect connect h/w problem
-	  It is sub module of ABC Hub Driver
-	  It depends on SEC_ABC_HUB Feature
-	  
-comment "Samsung ABC Hub Connect Detect Options"
-config SEC_ABC_HUB_COND_DAVINCI
-	bool "Samsung Davinci ABC Hub Connect Detect Feature"
-	depends on SEC_ABC_HUB_COND
-	default n
-	help
-	  Samsung COND(Connect Detect) Feature
-	  This function is to detect connect h/w problem
-	  It is sub module of ABC Hub Driver
-	  It depends on SEC_ABC_HUB Feature
-
 comment "Samsung ABC Hub Booting Time Check Options"
 config SEC_ABC_HUB_BOOTC
-	bool "Samsung ABC Hub Booting Time Check Feature"
+	tristate "Samsung ABC Hub Booting Time Check Feature"
 	depends on SEC_ABC_HUB
 	default n
 	help
@@ -95,7 +82,7 @@ config SEC_ABC_HUB_BOOTC
 
 comment "Samsung ABC Hub Booting Time Check eng mode Options"
 config SEC_ABC_HUB_BOOTC_ENG
-	bool "Samsung ABC Hub Booting Time Check eng mode Feature"
+	tristate "Samsung ABC Hub Booting Time Check eng mode Feature"
 	depends on SEC_ABC_HUB_BOOTC
 	default n
 	help

@@ -1955,4 +1955,3 @@ int synaptics_ts_fw_update_on_hidden_menu(struct synaptics_ts_data *ts, int upda
 EXPORT_SYMBOL(synaptics_ts_fw_update_on_hidden_menu);
 
 MODULE_LICENSE("GPL");
-

@@ -36,7 +36,7 @@
 #include <linux/completion.h>
 
 #if IS_ENABLED(CONFIG_BATTERY_SAMSUNG)
-#include "../../../../battery/common/sec_charging_common.h"
+#include "../../../../battery/common/a73xq/sec_charging_common.h"
 #endif
 
 void usbpd_manager_select_pdo_cancel(struct device *dev);
