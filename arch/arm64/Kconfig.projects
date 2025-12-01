@@ -36,3 +36,15 @@ config MACH_A73XQ_EUR_OPEN
 	help
 	  Support for Samsung A73XQ EUR OPEN device.
 
+config SEC_GTS7FEWIFI_PROJECT
+        default n
+        bool "Samsung GTS7FEWIFI Project"
+        help
+          Support for Samsung GTS7FEWIFI Project
+
+config MACH_GTS7FEWIFI_EUR_OPEN
+        default n
+        bool "Samsung GTS7FEWIFI EUR OPEN"
+        help
+          Support for Samsung GTS7FEWIFI EUR OPEN device.
+
