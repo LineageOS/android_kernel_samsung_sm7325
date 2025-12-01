@@ -16,6 +16,23 @@
       "message": "You don\u0027t necessarily need to diver because of this. Can be merged to 22.2.",
       "revId": "64f3957ba975b56e81b51d421da03cafc2de711e",
       "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71"
+    },
+    {
+      "unresolved": false,
+      "key": {
+        "uuid": "f3c0c1ea_075f2e9a",
+        "filename": "/PATCHSET_LEVEL",
+        "patchSetId": 1
+      },
+      "lineNbr": 0,
+      "author": {
+        "id": 36296
+      },
+      "writtenOn": "2025-12-01T18:52:12Z",
+      "side": 1,
+      "message": "hope this will be merged, it is required to compile los23",
+      "revId": "64f3957ba975b56e81b51d421da03cafc2de711e",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71"
     }
   ]
 }
