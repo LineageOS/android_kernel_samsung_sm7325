@@ -6,6 +6,8 @@ else ifeq ($(filter y,$(CONFIG_SEC_M52XQ_PROJECT)),y)
 dts-dirs += m52/m52xq
 else ifeq ($(filter y,$(CONFIG_SEC_A73XQ_PROJECT)),y)
 dts-dirs += a73/a73xq
+else ifeq ($(filter y,$(CONFIG_SEC_GTS7FEWIFI_PROJECT)),y)
+dts-dirs += gts7/gts7fewifi
 endif
 
 always          := $(dtb-y)
