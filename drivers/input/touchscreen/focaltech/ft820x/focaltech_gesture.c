@@ -298,7 +298,22 @@ int fts_gesture_suspend(struct fts_ts_data *ts_data)
 			break;
 	}
 
-	if (i >= 5)
+	if (i >= 5) {
+		FTS_INFO("gesture state was wrong, retrying by turning gesture off and on again");
+		fts_write_reg(FTS_REG_GESTURE_EN, DISABLE);
+		sec_delay(20);
+		fts_write_reg(0xD1, 0xFF);
+		fts_write_reg(0xD2, 0xFF);
+		fts_write_reg(0xD5, 0xFF);
+		fts_write_reg(0xD6, 0xFF);
+		fts_write_reg(0xD7, 0xFF);
+		fts_write_reg(0xD8, 0xFF);
+		fts_write_reg(FTS_REG_GESTURE_EN, ENABLE);
+		sec_delay(1);
+		fts_read_reg(FTS_REG_GESTURE_EN, &state);
+	}
+
+	if (state != ENABLE)
 		FTS_ERROR("make IC enter into gesture(suspend) fail,state:%x", state);
 	else
 		FTS_INFO("Enter into gesture(suspend) successfully");
