@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "unresolved": false,
+      "key": {
+        "uuid": "3b47f8fb_16441bd1",
+        "filename": "/PATCHSET_LEVEL",
+        "patchSetId": 1
+      },
+      "lineNbr": 0,
+      "author": {
+        "id": 25276
+      },
+      "writtenOn": "2026-01-28T19:47:43Z",
+      "side": 1,
+      "message": "Fixes USB pen drives only working after plugging the phone into a PC once",
+      "revId": "a93cb1b519a5aaa695536b4904d22774aefb763f",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71"
+    }
+  ]
+}
