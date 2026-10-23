@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2015-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -1649,10 +1648,7 @@ wmi_buf_alloc_debug(wmi_unified_t wmi_handle, uint32_t len,
 {
 	wmi_buf_t wmi_buf;
 
-	if (roundup(len, 4) > wmi_handle->max_msg_len) {
-		wmi_err("Invalid length %u (via %s:%u) max size: %u",
-			len, func_name, line_num,
-			wmi_handle->max_msg_len);
+	if (roundup(len + sizeof(WMI_CMD_HDR), 4) > wmi_handle->max_msg_len) {
 		QDF_ASSERT(0);
 		return NULL;
 	}
@@ -1693,9 +1689,9 @@ wmi_buf_t wmi_buf_alloc_fl(wmi_unified_t wmi_handle, uint32_t len,
 {
 	wmi_buf_t wmi_buf;
 
-	if (roundup(len, 4) > wmi_handle->max_msg_len) {
-		QDF_DEBUG_PANIC("Invalid length %u (via %s:%u) max size: %u",
-				len, func, line, wmi_handle->max_msg_len);
+	if (roundup(len + sizeof(WMI_CMD_HDR), 4) > wmi_handle->max_msg_len) {
+		QDF_DEBUG_PANIC("Invalid length %u (via %s:%u)",
+				len, func, line);
 		return NULL;
 	}
 
@@ -3571,7 +3567,6 @@ void wmi_set_target_suspend(wmi_unified_t wmi_handle, A_BOOL val)
 void wmi_set_target_suspend_acked(wmi_unified_t wmi_handle, A_BOOL val)
 {
 	qdf_atomic_set(&wmi_handle->is_target_suspend_acked, val);
-	qdf_atomic_set(&wmi_handle->num_stats_over_qmi, 0);
 }
 
 /**

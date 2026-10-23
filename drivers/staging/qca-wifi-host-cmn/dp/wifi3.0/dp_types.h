@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -534,30 +533,6 @@ struct dp_tx_desc_s {
 	struct hal_tx_desc_comp_s comp;
 };
 
-#ifdef QCA_AC_BASED_FLOW_CONTROL
-/**
- * enum flow_pool_status - flow pool status
- * @FLOW_POOL_ACTIVE_UNPAUSED : pool is active (can take/put descriptors)
- *				and network queues are unpaused
- * @FLOW_POOL_ACTIVE_PAUSED: pool is active (can take/put descriptors)
- *			   and network queues are paused
- * @FLOW_POOL_INVALID: pool is invalid (put descriptor)
- * @FLOW_POOL_INACTIVE: pool is inactive (pool is free)
- * @FLOW_POOL_ACTIVE_UNPAUSED_REATTACH: pool is reattached but network
- *					queues are not paused
- */
-enum flow_pool_status {
-	FLOW_POOL_ACTIVE_UNPAUSED = 0,
-	FLOW_POOL_ACTIVE_PAUSED = 1,
-	FLOW_POOL_BE_BK_PAUSED = 2,
-	FLOW_POOL_VI_PAUSED = 3,
-	FLOW_POOL_VO_PAUSED = 4,
-	FLOW_POOL_INVALID = 5,
-	FLOW_POOL_INACTIVE = 6,
-	FLOW_POOL_ACTIVE_UNPAUSED_REATTACH = 7,
-};
-
-#else
 /**
  * enum flow_pool_status - flow pool status
  * @FLOW_POOL_ACTIVE_UNPAUSED : pool is active (can take/put descriptors)
@@ -576,8 +551,6 @@ enum flow_pool_status {
 	FLOW_POOL_INVALID = 5,
 	FLOW_POOL_INACTIVE = 6,
 };
-
-#endif
 
 /**
  * struct dp_tx_tso_seg_pool_s
@@ -973,10 +946,6 @@ struct dp_soc_stats {
 		uint32_t msdu_scatter_wait_break;
 		/* Number of bar frames received */
 		uint32_t bar_frame;
-		/* Number of frames routed from rxdma */
-		uint32_t rxdma2rel_route_drop;
-		/* Number of frames routed from reo*/
-		uint32_t reo2rel_route_drop;
 
 		struct {
 			/* Invalid RBM error count */
@@ -1072,8 +1041,6 @@ struct dp_soc_stats {
 			uint32_t peer_unauth_rx_pkt_drop;
 			/* MSDU len err count */
 			uint32_t msdu_len_err;
-			/* Rx invalid tid count */
-			uint32_t rx_invalid_tid_err;
 		} err;
 
 		/* packet count per core - per ring */
@@ -1926,7 +1893,6 @@ struct dp_soc {
 	qdf_spinlock_t reo_desc_deferred_freelist_lock;
 	bool reo_desc_deferred_freelist_init;
 #endif
-	bool is_tx_pause;
 };
 
 #ifdef IPA_OFFLOAD
@@ -2545,15 +2511,6 @@ struct dp_pdev {
 
 struct dp_peer;
 
-#ifdef DP_RX_UDP_OVER_PEER_ROAM
-#define WLAN_ROAM_PEER_AUTH_STATUS_NONE 0x0
-/**
- * This macro is equivalent to macro ROAM_AUTH_STATUS_AUTHENTICATED used
- * in connection mgr
- */
-#define WLAN_ROAM_PEER_AUTH_STATUS_AUTHENTICATED 0x2
-#endif
-
 /* VDEV structure for data path state */
 struct dp_vdev {
 	/* OS device abstraction */
@@ -2595,6 +2552,9 @@ struct dp_vdev {
 
 	/* IGMP multicast enhancement enabled */
 	uint8_t igmp_mcast_enhanc_en;
+
+	/* HW TX Checksum Enabled Flag */
+	uint8_t csum_enabled;
 
 	/* vdev_id - ID used to specify a particular vdev to the target */
 	uint8_t vdev_id;
@@ -2799,22 +2759,8 @@ struct dp_vdev {
 	qdf_atomic_t ref_cnt;
 	qdf_atomic_t mod_refs[DP_MOD_ID_MAX];
 	uint8_t num_latency_critical_conn;
-#ifdef WLAN_FEATURE_TSF_UPLINK_DELAY
-	/* Indicate if uplink delay report is enabled or not */
-	qdf_atomic_t ul_delay_report;
-	/* Delta between TQM clock and TSF clock */
-	uint32_t delta_tsf;
-	/* accumulative delay for every TX completion */
-	qdf_atomic_t ul_delay_accum;
-	/* accumulative number of packets delay has accumulated */
-	qdf_atomic_t ul_pkts_accum;
-#endif /* WLAN_FEATURE_TSF_UPLINK_DELAY */
-
-#ifdef DP_RX_UDP_OVER_PEER_ROAM
-	uint32_t roaming_peer_status;
-	union dp_align_mac_addr roaming_peer_mac;
-#endif
 };
+
 
 enum {
 	dp_sec_mcast = 0,
@@ -3138,7 +3084,6 @@ struct dp_fisa_stats {
 	/* flow index invalid from RX HW TLV */
 	uint32_t invalid_flow_index;
 	uint32_t reo_mismatch;
-	 uint32_t incorrect_rdi;
 };
 
 enum fisa_aggr_ret {

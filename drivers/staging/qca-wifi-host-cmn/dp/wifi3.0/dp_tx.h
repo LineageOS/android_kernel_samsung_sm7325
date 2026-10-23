@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2016-2020 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022, 2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -68,7 +67,7 @@ do {                                                           \
 #define DP_TX_QUEUE_MASK 0x3
 
 /* number of dwords for htt_tx_msdu_desc_ext2_t */
-#define DP_TX_MSDU_INFO_META_DATA_DWORDS 9
+#define DP_TX_MSDU_INFO_META_DATA_DWORDS 7
 
 /**
  * struct dp_tx_frag_info_s
@@ -543,40 +542,4 @@ dp_send_completion_to_pkt_capture(struct dp_soc *soc,
 {
 }
 #endif
-
-#ifdef WLAN_FEATURE_TSF_UPLINK_DELAY
-/**
- * dp_set_delta_tsf() - Set delta_tsf to dp_soc structure
- * @soc_hdl: cdp soc pointer
- * @vdev_id: vdev id
- * @delta_tsf: difference between TSF clock and qtimer
- *
- * Return: None
- */
-void dp_set_delta_tsf(struct cdp_soc_t *soc_hdl, uint8_t vdev_id,
-		      uint32_t delta_tsf);
-
-/**
- * dp_set_tsf_report_ul_delay() - Enable or disable reporting uplink delay
- * @soc_hdl: cdp soc pointer
- * @vdev_id: vdev id
- * @enable: true to enable and false to disable
- *
- * Return: QDF_STATUS
- */
-QDF_STATUS dp_set_tsf_ul_delay_report(struct cdp_soc_t *soc_hdl,
-				      uint8_t vdev_id, bool enable);
-
-/**
- * dp_get_uplink_delay() - Get uplink delay value
- * @soc_hdl: cdp soc pointer
- * @vdev_id: vdev id
- * @val: pointer to save uplink delay value
- *
- * Return: QDF_STATUS
- */
-QDF_STATUS dp_get_uplink_delay(struct cdp_soc_t *soc_hdl, uint8_t vdev_id,
-			       uint32_t *val);
-#endif /* WLAN_FEATURE_TSF_UPLINK_TSF */
-
 #endif

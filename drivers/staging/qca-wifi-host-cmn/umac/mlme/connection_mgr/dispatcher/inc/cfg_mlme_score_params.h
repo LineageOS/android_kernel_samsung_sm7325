@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2012-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2021,2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -385,8 +384,8 @@
  * <ini>
  * sae_pk_ap_weightage - update scoring param based on SAE PK ap weightage
  * @Min: 0
- * @Max: 30
- * @Default: 30
+ * @Max: 10
+ * @Default: 3
  *
  * This ini is used to calculate SAE PK ap weightage in roam score. SAE Public
  * Key (SAE-PK) authentication is an extension of SAE that is intended for use
@@ -406,8 +405,8 @@
 #define CFG_SAE_PK_AP_WEIGHTAGE CFG_INI_UINT( \
 		"sae_pk_ap_weightage", \
 		0, \
-		30, \
-		PLATFORM_VALUE(30, 0), \
+		10, \
+		PLATFORM_VALUE(3, 0), \
 		CFG_VALUE_OR_DEFAULT,\
 		"SAE-PK AP weightage")
 
@@ -1112,7 +1111,7 @@
  * BSSID.
  * @Min: 0
  * @Max: 1
- * @Default: non AP 1, AP 0
+ * @Default: 0
  *
  * This ini is used to Enable check for 6Ghz allowed security. If enabled
  * only WPA3 and other allowed security will be allowed for 6Ghz connection
@@ -1126,7 +1125,7 @@
  * </ini>
  */
 #define CFG_CHECK_6GHZ_SECURITY CFG_INI_BOOL(\
-				"check_6ghz_security", PLATFORM_VALUE(1, 0), \
+				"check_6ghz_security", 0, \
 				"Enable check for 6Ghz allowed security")
 /*
  * <ini>

@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2020-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021, 2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -29,11 +28,13 @@
  * @PACKET_CAPTURE_MODE_DISABLE: packet capture mode disable
  * @PACKET_CAPTURE_MODE_MGMT_ONLY: capture mgmt packets only
  * @PACKET_CAPTURE_MODE_DATA_ONLY: capture data packets only
+ * @PACKET_CAPTURE_MODE_DATA_MGMT: capture both data and mgmt packets
  */
 enum pkt_capture_mode {
 	PACKET_CAPTURE_MODE_DISABLE = 0,
-	PACKET_CAPTURE_MODE_MGMT_ONLY = BIT(0),
-	PACKET_CAPTURE_MODE_DATA_ONLY = BIT(1),
+	PACKET_CAPTURE_MODE_MGMT_ONLY,
+	PACKET_CAPTURE_MODE_DATA_ONLY,
+	PACKET_CAPTURE_MODE_DATA_MGMT,
 };
 
 /**
@@ -50,9 +51,9 @@ enum pkt_capture_mode {
 enum pkt_capture_config {
 	PACKET_CAPTURE_CONFIG_TRIGGER_ENABLE = BIT(0),
 	PACKET_CAPTURE_CONFIG_QOS_ENABLE = BIT(1),
-	PACKET_CAPTURE_CONFIG_BEACON_ENABLE = BIT(2),
-	PACKET_CAPTURE_CONFIG_OFF_CHANNEL_BEACON_ENABLE = BIT(3),
-	PACKET_CAPTURE_CONFIG_NO_BEACON_ENABLE = BIT(4),
+	PACKET_CAPTURE_CONFIG_NO_BEACON_ENABLE = BIT(2),
+	PACKET_CAPTURE_CONFIG_BEACON_ENABLE = BIT(3),
+	PACKET_CAPTURE_CONFIG_OFF_CHANNEL_BEACON_ENABLE = BIT(4),
 };
 
 /**
@@ -73,7 +74,7 @@ enum pkt_capture_config {
 struct mgmt_offload_event_params {
 	uint32_t tsf_l32;
 	uint32_t chan_freq;
-	uint16_t rate_kbps;
+	uint32_t rate_kbps;
 	uint32_t rssi;
 	uint32_t buf_len;
 	uint32_t tx_status;
@@ -83,7 +84,7 @@ struct mgmt_offload_event_params {
 
 struct smu_event_params {
 	uint32_t vdev_id;
-	uint8_t rx_vht_sgi;
+	int32_t rx_avg_rssi;
 };
 
 /**

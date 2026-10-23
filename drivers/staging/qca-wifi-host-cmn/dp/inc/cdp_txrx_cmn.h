@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2011-2020 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -694,33 +693,6 @@ cdp_peer_delete(ol_txrx_soc_handle soc, uint8_t vdev_id,
 
 	soc->ops->cmn_drv_ops->txrx_peer_delete(soc, vdev_id, peer_mac, bitmap);
 }
-
-#ifdef DP_RX_UDP_OVER_PEER_ROAM
-static inline void
-cdp_update_roaming_peer_in_vdev(ol_txrx_soc_handle soc, uint8_t vdev_id,
-				uint8_t *peer_mac, uint32_t auth_status)
-{
-	if (!soc || !soc->ops) {
-		QDF_TRACE(QDF_MODULE_ID_CDP, QDF_TRACE_LEVEL_DEBUG,
-				"%s: Invalid Instance:", __func__);
-		QDF_BUG(0);
-		return;
-	}
-
-	if (!soc->ops->cmn_drv_ops ||
-	    !soc->ops->cmn_drv_ops->txrx_update_roaming_peer)
-		return;
-
-	soc->ops->cmn_drv_ops->txrx_update_roaming_peer(soc, vdev_id,
-							peer_mac, auth_status);
-}
-#else
-static inline void
-cdp_update_roaming_peer_in_vdev(ol_txrx_soc_handle soc, uint8_t vdev_id,
-				uint8_t *peer_mac, uint32_t auth_status)
-{
-}
-#endif
 
 /**
  * cdp_peer_detach_sync() - peer detach sync callback
@@ -2045,30 +2017,6 @@ cdp_txrx_set_pdev_status_down(ol_txrx_soc_handle soc,
 
 	return soc->ops->cmn_drv_ops->set_pdev_status_down(soc, pdev_id,
 						    is_pdev_down);
-}
-
-/**
- * cdp_set_tx_pause() - Pause or resume tx path
- * @soc_hdl: Datapath soc handle
- * @flag: set or clear is_tx_pause
- *
- * Return: None.
- */
-static inline
-void cdp_set_tx_pause(ol_txrx_soc_handle soc, bool flag)
-{
-	if (!soc || !soc->ops) {
-		QDF_TRACE(QDF_MODULE_ID_CDP, QDF_TRACE_LEVEL_DEBUG,
-			  "%s: Invalid Instance:", __func__);
-		QDF_BUG(0);
-		return;
-	}
-
-	if (!soc->ops->cmn_drv_ops ||
-				!soc->ops->cmn_drv_ops->set_tx_pause)
-		return;
-
-	soc->ops->cmn_drv_ops->set_tx_pause(soc, flag);
 }
 
 /**

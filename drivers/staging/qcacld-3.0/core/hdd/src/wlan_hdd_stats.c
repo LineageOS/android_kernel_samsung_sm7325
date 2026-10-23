@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -90,7 +90,6 @@
 #endif /* kernel version less than 4.0.0 && no_backport */
 
 #define HDD_LINK_STATS_MAX		5
-#define HDD_MAX_ALLOWED_LL_STATS_FAILURE	5
 
 /* 11B, 11G Rate table include Basic rate and Extended rate
  * The IDX field is the rate index
@@ -581,10 +580,7 @@ static bool put_wifi_interface_info(struct wifi_interface_info *stats,
 		    REG_ALPHA2_LEN + 1, stats->apCountryStr) ||
 	    nla_put(vendor_event,
 		    QCA_WLAN_VENDOR_ATTR_LL_STATS_IFACE_INFO_COUNTRY_STR,
-		    REG_ALPHA2_LEN + 1, stats->countryStr) ||
-	    nla_put_u32(vendor_event,
-			QCA_WLAN_VENDOR_ATTR_LL_STATS_IFACE_INFO_TS_DUTY_CYCLE,
-			stats->time_slice_duty_cycle)) {
+		    REG_ALPHA2_LEN + 1, stats->countryStr)) {
 		hdd_err("QCA_WLAN_VENDOR_ATTR put fail");
 		return false;
 	}
@@ -935,33 +931,6 @@ hdd_link_layer_process_iface_stats(struct hdd_adapter *adapter,
 }
 
 /**
- * put_channel_stats_chload - put chload of channel stats
- * @vendor_event: vendor event
- * @channel_stats: Pointer to channel stats
- *
- * Return: bool
- */
-static bool put_channel_stats_chload(struct sk_buff *vendor_event,
-				     struct wifi_channel_stats *channel_stats)
-{
-	uint64_t txrx_time;
-	uint32_t chload;
-
-	if (!channel_stats->on_time)
-		return true;
-
-	txrx_time = (channel_stats->tx_time + channel_stats->rx_time) * 100;
-	chload = qdf_do_div(txrx_time, channel_stats->on_time);
-
-	if (nla_put_u8(vendor_event,
-		       QCA_WLAN_VENDOR_ATTR_LL_STATS_CHANNEL_LOAD_PERCENTAGE,
-		       chload))
-		return false;
-
-	return true;
-}
-
-/**
  * hdd_llstats_radio_fill_channels() - radio stats fill channels
  * @adapter: Pointer to device adapter
  * @radiostat: Pointer to stats data
@@ -1032,13 +1001,6 @@ static int hdd_llstats_radio_fill_channels(struct hdd_adapter *adapter,
 				QCA_WLAN_VENDOR_ATTR_LL_STATS_CHANNEL_RX_TIME,
 				channel_stats->rx_time)) {
 				hdd_err("nla_put failed for tx time (%u, %d)",
-					radiostat->num_channels, i);
-				return -EINVAL;
-			}
-
-			if (!put_channel_stats_chload(vendor_event,
-						      channel_stats)) {
-				hdd_err("nla_put failed for chload (%u, %d)",
 					radiostat->num_channels, i);
 				return -EINVAL;
 			}
@@ -2066,17 +2028,14 @@ static int wlan_hdd_send_ll_stats_req(struct hdd_adapter *adapter,
 	}
 	ret = osif_request_wait_for_response(request);
 	if (ret) {
-		adapter->ll_stats_failure_count++;
-		hdd_err("Target response timed out request id %d request bitmap 0x%x ll_stats failure count %d",
-			priv->request_id, priv->request_bitmap,
-			adapter->ll_stats_failure_count);
+		hdd_err("Target response timed out request id %d request bitmap 0x%x",
+			priv->request_id, priv->request_bitmap);
 		qdf_spin_lock(&priv->ll_stats_lock);
 		priv->request_bitmap = 0;
 		qdf_spin_unlock(&priv->ll_stats_lock);
 		ret = -ETIMEDOUT;
 	} else {
 		hdd_update_station_stats_cached_timestamp(adapter);
-		adapter->ll_stats_failure_count = 0;
 	}
 	qdf_spin_lock(&priv->ll_stats_lock);
 	status = qdf_list_remove_front(&priv->ll_stats_q, &ll_node);
@@ -2096,12 +2055,6 @@ exit:
 	wlan_hdd_reset_station_stats_request_pending(hdd_ctx->psoc, adapter);
 	hdd_exit();
 	osif_request_put(request);
-
-	if (adapter->ll_stats_failure_count >=
-					HDD_MAX_ALLOWED_LL_STATS_FAILURE) {
-		cds_trigger_recovery(QDF_STATS_REQ_TIMEDOUT);
-		adapter->ll_stats_failure_count = 0;
-	}
 
 	return ret;
 }
@@ -2184,11 +2137,6 @@ __wlan_hdd_cfg80211_ll_stats_get(struct wiphy *wiphy,
 	if (!adapter->is_link_layer_stats_set) {
 		hdd_nofl_debug("is_link_layer_stats_set: %d",
 			       adapter->is_link_layer_stats_set);
-		return -EINVAL;
-	}
-
-	if (adapter->device_mode == QDF_SAP_MODE) {
-		hdd_nofl_debug("LL_STATS get is not supported for SAP mode");
 		return -EINVAL;
 	}
 
@@ -4241,7 +4189,7 @@ static void wlan_hdd_fill_summary_stats(tCsrSummaryStatsInfo *stats,
 	if (cds_dp_get_vdev_stats(vdev_id, &dp_stats)) {
 		orig_cnt = info->tx_retries;
 		orig_fail_cnt = info->tx_failed;
-		info->tx_retries = dp_stats.tx_retries_mpdu;
+		info->tx_retries = dp_stats.tx_retries;
 		info->tx_failed += dp_stats.tx_mpdu_success_with_retries;
 		hdd_debug("vdev %d tx retries adjust from %d to %d",
 			  vdev_id, orig_cnt, info->tx_retries);
@@ -4635,11 +4583,11 @@ static void hdd_fill_sinfo_rate_info(struct station_info *sinfo,
 		}
 	}
 
-	hdd_debug("flag %x mcs %d legacy %d nss %d",
-		  rate_info->flags,
-		  rate_info->mcs,
-		  rate_info->legacy,
-		  rate_info->nss);
+	hdd_info("flag %x mcs %d legacy %d nss %d",
+		 rate_info->flags,
+		 rate_info->mcs,
+		 rate_info->legacy,
+		 rate_info->nss);
 
 	if (is_tx)
 		sinfo->filled |= HDD_INFO_TX_BITRATE;
@@ -4734,7 +4682,7 @@ static void hdd_fill_rate_info(struct wlan_objmgr_psoc *psoc,
 				       &link_speed_rssi_low,
 				       &link_speed_rssi_report);
 
-	hdd_debug("reportMaxLinkSpeed %d", link_speed_rssi_report);
+	hdd_info("reportMaxLinkSpeed %d", link_speed_rssi_report);
 
 	/* convert to 100kbps expected in rate table */
 	tx_rate = stats->tx_rate.rate / 100;
@@ -4925,20 +4873,20 @@ static void wlan_hdd_fill_station_info(struct wlan_objmgr_psoc *psoc,
 	sinfo->assoc_req_ies_len = stainfo->assoc_req_ies.len;
 
 	/* dump sta info*/
-	hdd_debug("dump stainfo");
-	hdd_debug("con_time %d inact_time %d tx_pkts %d rx_pkts %d",
-		  sinfo->connected_time, sinfo->inactive_time,
-		  sinfo->tx_packets, sinfo->rx_packets);
-	hdd_debug("failed %d retries %d tx_bytes %lld rx_bytes %lld",
-		  sinfo->tx_failed, sinfo->tx_retries,
-		  sinfo->tx_bytes, sinfo->rx_bytes);
-	hdd_debug("rssi %d tx mcs %d legacy %d nss %d flags %x",
-		  sinfo->signal, sinfo->txrate.mcs,
-		  sinfo->txrate.legacy, sinfo->txrate.nss,
-		  sinfo->txrate.flags);
-	hdd_debug("rx mcs %d legacy %d nss %d flags %x",
-		  sinfo->rxrate.mcs, sinfo->rxrate.legacy,
-		  sinfo->rxrate.nss, sinfo->rxrate.flags);
+	hdd_info("dump stainfo");
+	hdd_info("con_time %d inact_time %d tx_pkts %d rx_pkts %d",
+		 sinfo->connected_time, sinfo->inactive_time,
+		 sinfo->tx_packets, sinfo->rx_packets);
+	hdd_info("failed %d retries %d tx_bytes %lld rx_bytes %lld",
+		 sinfo->tx_failed, sinfo->tx_retries,
+		 sinfo->tx_bytes, sinfo->rx_bytes);
+	hdd_info("rssi %d tx mcs %d legacy %d nss %d flags %x",
+		 sinfo->signal, sinfo->txrate.mcs,
+		 sinfo->txrate.legacy, sinfo->txrate.nss,
+		 sinfo->txrate.flags);
+	hdd_info("rx mcs %d legacy %d nss %d flags %x",
+		 sinfo->rxrate.mcs, sinfo->rxrate.legacy,
+		 sinfo->rxrate.nss, sinfo->rxrate.flags);
 }
 
 /**
@@ -5048,7 +4996,7 @@ static uint8_t hdd_get_rate_flags(uint32_t rate,
 	else if (mode == SIR_SME_PHY_MODE_VHT)
 		flags = hdd_get_rate_flags_vht(rate, nss, mcs);
 	else
-		hdd_debug("invalid mode param %d", mode);
+		hdd_err("invalid mode param %d", mode);
 
 	return flags;
 }
@@ -5644,8 +5592,7 @@ void hdd_wlan_fill_per_chain_rssi_stats(struct station_info *sinfo,
 }
 #endif
 
-#if (LINUX_VERSION_CODE >= KERNEL_VERSION(4, 20, 0)) || \
-	defined(CFG80211_RX_FCS_ERROR_REPORTING_SUPPORT)
+#if defined(CFG80211_RX_FCS_ERROR_REPORTING_SUPPORT)
 static void hdd_fill_fcs_and_mpdu_count(struct hdd_adapter *adapter,
 					struct station_info *sinfo)
 {
@@ -5723,8 +5670,7 @@ static int wlan_hdd_get_sta_stats(struct wiphy *wiphy,
 		return 0;
 	}
 
-	if (sta_ctx->hdd_reassoc_scenario ||
-	    hdd_is_roaming_in_progress(hdd_ctx)) {
+	if (sta_ctx->hdd_reassoc_scenario) {
 		hdd_debug("Roaming is in progress, cannot continue with this request");
 		/*
 		 * supplicant reports very low rssi to upper layer

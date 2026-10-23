@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -165,7 +164,7 @@ u8 ccp_rsn_oui_13[HDD_RSN_OUI_SIZE] = {0x50, 0x6F, 0x9A, 0x01};
 
 #define HDD_PEER_AUTHORIZE_WAIT 10
 
-/*
+/**
  * beacon_filter_table - table of IEs used for beacon filtering
  */
 static const int beacon_filter_table[] = {
@@ -434,6 +433,18 @@ struct hdd_adapter *hdd_get_sta_connection_in_progress(
 					hdd_adapter_dev_put_debug(next_adapter,
 								  dbgid);
 				return adapter;
+			} else if ((eConnectionState_Associated ==
+				   hdd_sta_ctx->conn_info.conn_state) &&
+				   sme_is_sta_key_exchange_in_progress(
+							hdd_ctx->mac_handle,
+							adapter->vdev_id)) {
+				hdd_debug("vdev_id %d: Key exchange is in progress",
+					  adapter->vdev_id);
+				hdd_adapter_dev_put_debug(adapter, dbgid);
+				if (next_adapter)
+					hdd_adapter_dev_put_debug(next_adapter,
+								  dbgid);
+				return adapter;
 			}
 		}
 		hdd_adapter_dev_put_debug(adapter, dbgid);
@@ -457,47 +468,6 @@ void hdd_abort_ongoing_sta_connection(struct hdd_context *hdd_ctx)
 			hdd_err("wlan_hdd_disconnect failed, status: %d",
 				status);
 		}
-	}
-}
-
-void hdd_abort_ongoing_sta_sae_connection(struct hdd_context *hdd_ctx,
-					  struct hdd_adapter *adapter)
-{
-	struct hdd_adapter *sta_adapter;
-	struct wlan_objmgr_vdev *vdev;
-	int32_t key_mgmt;
-	QDF_STATUS status;
-
-	sta_adapter = hdd_get_sta_connection_in_progress(hdd_ctx);
-	if (!sta_adapter) {
-		hdd_err("sta_adapter is NULL");
-		return;
-	}
-
-	vdev = hdd_objmgr_get_vdev(adapter);
-	if (!vdev) {
-		hdd_err("vdev is NULL");
-		return;
-	}
-
-	key_mgmt = wlan_crypto_get_param(vdev, WLAN_CRYPTO_PARAM_KEY_MGMT);
-	hdd_objmgr_put_vdev(vdev);
-
-	if (key_mgmt < 0) {
-		hdd_debug_rl("Invalid key_mgmt: %d", key_mgmt);
-		return;
-	}
-
-	if (QDF_HAS_PARAM(key_mgmt, WLAN_CRYPTO_KEY_MGMT_SAE) ||
-	    QDF_HAS_PARAM(key_mgmt, WLAN_CRYPTO_KEY_MGMT_FT_SAE)) {
-		hdd_debug("Disconnecting STA on vdev: %d",
-			  sta_adapter->vdev_id);
-		status = wlan_hdd_disconnect(sta_adapter,
-					     eCSR_DISCONNECT_REASON_DEAUTH,
-					     REASON_DISASSOC_NETWORK_LEAVING);
-		if (QDF_IS_STATUS_ERROR(status))
-			hdd_err("wlan_hdd_disconnect failed, status: %d",
-				status);
 	}
 }
 
@@ -932,9 +902,6 @@ static void hdd_copy_ht_operation(struct hdd_station_ctx *hdd_sta_ctx,
 		hdd_ht_ops->operation_mode |=
 			IEEE80211_HT_OP_MODE_NON_HT_STA_PRSNT;
 
-	if (roam_ht_ops->chan_center_freq_seg2)
-		hdd_ht_ops->operation_mode |=
-			(roam_ht_ops->chan_center_freq_seg2 << IEEE80211_HT_OP_MODE_CCFS2_SHIFT);
 	/* stbc_param */
 	temp_ht_ops = roam_ht_ops->basicSTBCMCS &
 			HT_STBC_PARAM_MCS;
@@ -2929,30 +2896,6 @@ void hdd_clear_fils_connection_info(struct hdd_adapter *adapter)
 #endif
 
 /**
- * hdd_netif_features_update_required() - Check if feature update
- * is required
- * @adapter: pointer to the adapter structure
- * Returns: true if the connection is legacy and TSO and Checksum offload
- * enabled or if the connection is not latency and TSO and Checksum
- * offload are not enabled, false otherwise
- */
-static bool hdd_netif_features_update_required(struct hdd_adapter *adapter)
-{
-	bool is_legacy_connection = hdd_is_legacy_connection(adapter);
-
-	hdd_debug("Legacy Connection: %d, TSO_CSUM Feature Enabled:%d",
-		  is_legacy_connection, adapter->tso_csum_feature_enabled);
-
-	if (adapter->tso_csum_feature_enabled  && is_legacy_connection)
-		return true;
-
-	if (!adapter->tso_csum_feature_enabled  && !is_legacy_connection)
-		return true;
-
-	return false;
-}
-
-/**
  * hdd_netif_queue_enable() - Enable the network queue for a
  *			      particular adapter.
  * @adapter: pointer to the adapter structure
@@ -2969,17 +2912,17 @@ static inline void hdd_netif_queue_enable(struct hdd_adapter *adapter)
 	ol_txrx_soc_handle soc = cds_get_context(QDF_MODULE_ID_SOC);
 	struct hdd_context *hdd_ctx = WLAN_HDD_GET_CTX(adapter);
 
-	if (cdp_cfg_get(soc, cfg_dp_disable_legacy_mode_csum_offload) &&
-	    hdd_netif_features_update_required(adapter)) {
+	if (cdp_cfg_get(soc, cfg_dp_disable_legacy_mode_csum_offload)) {
 		hdd_adapter_ops_record_event(hdd_ctx,
 					     WLAN_HDD_ADAPTER_OPS_WORK_POST,
 					     adapter->vdev_id);
 		qdf_queue_work(0, hdd_ctx->adapter_ops_wq,
 			       &adapter->netdev_features_update_work);
+	} else {
+		wlan_hdd_netif_queue_control(adapter,
+					     WLAN_WAKE_ALL_NETIF_QUEUE,
+					     WLAN_CONTROL_PATH);
 	}
-	wlan_hdd_netif_queue_control(adapter,
-				     WLAN_WAKE_ALL_NETIF_QUEUE,
-				     WLAN_CONTROL_PATH);
 }
 
 static void hdd_save_connect_status(struct hdd_adapter *adapter,
@@ -3116,6 +3059,15 @@ hdd_association_completion_handler(struct hdd_adapter *adapter,
 				     ie_len);
 			hdd_debug("ap_supports_immediate_power_save flag [%d]",
 				  sta_ctx->ap_supports_immediate_power_save);
+		}
+
+		/* Indicate 'connect' status to user space */
+		hdd_send_association_event(dev, roam_info);
+
+		if (policy_mgr_is_mcc_in_24G(hdd_ctx->psoc)) {
+			if (hdd_ctx->miracast_value)
+				wlan_hdd_set_mas(adapter,
+					hdd_ctx->miracast_value);
 		}
 
 		/* Initialize the Linkup event completion variable */
@@ -3313,33 +3265,6 @@ hdd_association_completion_handler(struct hdd_adapter *adapter,
 				assoc_req_len = 0;
 			}
 
-			if (!hddDisconInProgress) {
-				/*
-				 * Perform any WMM-related association
-				 * processing.
-				 */
-				hdd_wmm_assoc(adapter, roam_info,
-					      eCSR_BSS_TYPE_INFRASTRUCTURE);
-
-				/*
-				 * Register the Station with DP after associated
-				 */
-				qdf_status = hdd_roam_register_sta(adapter,
-						roam_info,
-						roam_info->bss_desc);
-				hdd_debug("Enabling queues");
-				hdd_netif_queue_enable(adapter);
-			}
-
-			/* Indicate 'connect' status to user space */
-			hdd_send_association_event(dev, roam_info);
-
-			if (policy_mgr_is_mcc_in_24G(hdd_ctx->psoc)) {
-				if (hdd_ctx->miracast_value)
-					wlan_hdd_set_mas(adapter,
-						hdd_ctx->miracast_value);
-			}
-
 			if ((roam_info->u.pConnectedProfile->AuthType ==
 			     eCSR_AUTH_TYPE_FT_RSN) ||
 			    (roam_info->u.pConnectedProfile->AuthType ==
@@ -3481,10 +3406,38 @@ hdd_association_completion_handler(struct hdd_adapter *adapter,
 							       conn_info_freq);
 				}
 			}
+			if (!hddDisconInProgress) {
+				/*
+				 * Perform any WMM-related association
+				 * processing.
+				 */
+				hdd_wmm_assoc(adapter, roam_info,
+					      eCSR_BSS_TYPE_INFRASTRUCTURE);
+
+				/*
+				 * Register the Station with DP after associated
+				 */
+				qdf_status = hdd_roam_register_sta(adapter,
+						roam_info,
+						roam_info->bss_desc);
+				hdd_debug("Enabling queues");
+				hdd_netif_queue_enable(adapter);
+			}
 		} else {
+			/*
+			 * wpa supplicant expecting WPA/RSN IE in connect result
+			 * in case of reassociation also need to indicate it to
+			 * supplicant.
+			 */
+			sme_roam_get_wpa_rsn_req_ie(
+						mac_handle,
+						adapter->vdev_id,
+						&reqRsnLength, reqRsnIe);
+
 			cdp_hl_fc_set_td_limit(soc, adapter->vdev_id,
 					       conn_info_freq);
-
+			hdd_send_re_assoc_event(dev, adapter, roam_info,
+						reqRsnIe, reqRsnLength);
 			/* Reassoc successfully */
 			if (roam_info->fAuthRequired) {
 				qdf_status =
@@ -3522,30 +3475,7 @@ hdd_association_completion_handler(struct hdd_adapter *adapter,
 			/* Start the tx queues */
 			hdd_debug("Enabling queues");
 			hdd_netif_queue_enable(adapter);
-
-			/* Indicate 'connect' status to user space */
-			hdd_send_association_event(dev, roam_info);
-
-			if (policy_mgr_is_mcc_in_24G(hdd_ctx->psoc)) {
-				if (hdd_ctx->miracast_value)
-					wlan_hdd_set_mas(adapter,
-						hdd_ctx->miracast_value);
-			}
-
-			/*
-			 * wpa supplicant expecting WPA/RSN IE in connect result
-			 * in case of reassociation also need to indicate it to
-			 * supplicant.
-			 */
-			sme_roam_get_wpa_rsn_req_ie(
-						mac_handle,
-						adapter->vdev_id,
-						&reqRsnLength, reqRsnIe);
-
-			hdd_send_re_assoc_event(dev, adapter, roam_info,
-						reqRsnIe, reqRsnLength);
 		}
-
 		qdf_mem_free(reqRsnIe);
 
 		if (!QDF_IS_STATUS_SUCCESS(qdf_status)) {

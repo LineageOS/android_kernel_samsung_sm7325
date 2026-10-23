@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2018-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -188,7 +187,7 @@ QDF_STATUS mlme_init_twt_context(struct wlan_objmgr_psoc *psoc,
 	peer = wlan_objmgr_get_peer_by_mac(psoc, peer_mac->bytes,
 					   WLAN_MLME_NB_ID);
 	if (!peer) {
-		mlme_legacy_debug("Peer object not found");
+		mlme_legacy_err("Peer object not found");
 		return QDF_STATUS_E_FAILURE;
 	}
 
@@ -196,7 +195,7 @@ QDF_STATUS mlme_init_twt_context(struct wlan_objmgr_psoc *psoc,
 							  WLAN_UMAC_COMP_MLME);
 	if (!peer_priv) {
 		wlan_objmgr_peer_release_ref(peer, WLAN_MLME_NB_ID);
-		mlme_legacy_debug("peer mlme component object is NULL");
+		mlme_legacy_err("peer mlme component object is NULL");
 		return QDF_STATUS_E_FAILURE;
 	}
 
@@ -464,7 +463,7 @@ void mlme_set_twt_peer_capabilities(struct wlan_objmgr_psoc *psoc,
 	peer = wlan_objmgr_get_peer_by_mac(psoc, peer_mac->bytes,
 					   WLAN_MLME_NB_ID);
 	if (!peer) {
-		mlme_legacy_debug("Peer object not found");
+		mlme_legacy_err("Peer object not found");
 		return;
 	}
 
@@ -472,7 +471,7 @@ void mlme_set_twt_peer_capabilities(struct wlan_objmgr_psoc *psoc,
 							  WLAN_UMAC_COMP_MLME);
 	if (!peer_priv) {
 		wlan_objmgr_peer_release_ref(peer, WLAN_MLME_NB_ID);
-		mlme_legacy_debug("peer mlme object is NULL");
+		mlme_legacy_err("peer mlme object is NULL");
 		return;
 	}
 

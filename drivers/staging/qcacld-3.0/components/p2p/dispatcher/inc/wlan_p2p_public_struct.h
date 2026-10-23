@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2017-2019 The Linux Foundation. All rights reserved.
- * Copyright (c) 2025 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -62,13 +61,13 @@ struct p2p_ps_params {
 /**
  * struct p2p_roc_req - P2P roc request
  * @vdev_id:     Vdev id on which this request has come
- * @chan_freq:   Chan frequency for which this RoC has been requested
+ * @chan:        Chan for which this RoC has been requested
  * @phy_mode:    PHY mode
  * @duration:    Duration for the RoC
  */
 struct p2p_roc_req {
 	uint32_t vdev_id;
-	qdf_freq_t chan_freq;
+	uint32_t chan;
 	uint32_t phy_mode;
 	uint32_t duration;
 };
@@ -90,14 +89,14 @@ enum p2p_roc_event {
  * @vdev_id:     Vdev id
  * @roc_event:   RoC event
  * @cookie:      Cookie which is given to supplicant for this roc req
- * @chan_freq:   Chan frequency for which this RoC has been requested
+ * @chan:        Chan for which this RoC has been requested
  * @duration:    Duration for the RoC
   */
 struct p2p_event {
 	uint32_t vdev_id;
 	enum p2p_roc_event roc_event;
 	uint64_t cookie;
-	qdf_freq_t chan_freq;
+	uint32_t chan;
 	uint32_t duration;
 };
 
@@ -138,7 +137,7 @@ struct p2p_tx_cnf {
 /**
  * struct p2p_mgmt_tx - p2p mgmt tx structure
  * @vdev_id:             Vdev id
- * @chan_freq:           Chan frequency for which this RoC has been requested
+ * @chan:                Chan for which this RoC has been requested
  * @wait:                Duration for the RoC
  * @len:                 Length of tx buffer
  * @no_cck:              Required cck or not
@@ -148,7 +147,7 @@ struct p2p_tx_cnf {
  */
 struct p2p_mgmt_tx {
 	uint32_t vdev_id;
-	qdf_freq_t chan_freq;
+	uint32_t chan;
 	uint32_t wait;
 	uint32_t len;
 	uint32_t no_cck;

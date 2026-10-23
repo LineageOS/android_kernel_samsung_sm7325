@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -1069,7 +1068,7 @@ wlan_crypto_selective_clear_sae_single_pmk_entries(
 		struct wlan_objmgr_vdev *vdev, struct qdf_mac_addr *conn_bssid);
 
 /**
- * wlan_crypto_set_sae_single_pmk_bss_cap - Set the peer SAE single pmk
+ * wlan_crypto_set_sae_single_pmk_bss_cap - Set the peer SAE sinlge pmk
  * feature supported status
  * @vdev: Vdev
  * @bssid: BSSID for which the flag is to be set
@@ -1079,16 +1078,6 @@ wlan_crypto_selective_clear_sae_single_pmk_entries(
 void wlan_crypto_set_sae_single_pmk_bss_cap(struct wlan_objmgr_vdev *vdev,
 					    struct qdf_mac_addr *bssid,
 					    bool single_pmk_capable_bss);
-
-/**
- * wlan_crypto_set_sae_single_pmk_info - Set the peer SAE single pmk info
- * @vdev: Vdev
- * @roam_sync_pmksa: pmk info for roamed AP
- */
-void
-wlan_crypto_set_sae_single_pmk_info(struct wlan_objmgr_vdev *vdev,
-				    struct wlan_crypto_pmksa *roam_sync_pmksa);
-
 #else
 static inline void
 wlan_crypto_selective_clear_sae_single_pmk_entries(
@@ -1100,12 +1089,6 @@ static inline
 void wlan_crypto_set_sae_single_pmk_bss_cap(struct wlan_objmgr_vdev *vdev,
 					    struct qdf_mac_addr *bssid,
 					    bool single_pmk_capable_bss)
-{
-}
-
-static inline void
-wlan_crypto_set_sae_single_pmk_info(struct wlan_objmgr_vdev *vdev,
-				    struct wlan_crypto_pmksa *roam_sync_pmksa)
 {
 }
 #endif
@@ -1130,23 +1113,4 @@ wlan_crypto_set_sae_single_pmk_info(struct wlan_objmgr_vdev *vdev,
 QDF_STATUS wlan_crypto_create_fils_rik(uint8_t *rrk, uint8_t rrk_len,
 				       uint8_t *rik, uint32_t *rik_len);
 #endif /* WLAN_FEATURE_FILS_SK */
-
-/**
- * wlan_crypto_rsn_suite_to_cipher - This API converts a RSN cipher selector OUI
- * to an internal cipher algorithm. Where appropriate we also record any key
- * length.
- * @sel: input RSN suite
- *
- * Return: cipher suite value
- */
-int32_t wlan_crypto_rsn_suite_to_cipher(const uint8_t *sel);
-
-/**
- * wlan_crypto_rsn_suite_to_keymgmt() - This API converts an RSN key management/
- * authentication algorithm to an internal code.
- * @sel: input RSN suite
- *
- * Return: keymgmt value
- */
-int32_t wlan_crypto_rsn_suite_to_keymgmt(const uint8_t *sel);
 #endif /* end of _WLAN_CRYPTO_GLOBAL_API_H_ */

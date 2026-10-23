@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2012-2020 The Linux Foundation. All rights reserved.
- * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -257,7 +256,8 @@ enum {
   Function declarations and documenation
   ------------------------------------------------------------------------*/
 QDF_STATUS sme_open(mac_handle_t mac_handle);
-QDF_STATUS sme_init_chan_list(mac_handle_t mac_handle, enum country_src cc_src);
+QDF_STATUS sme_init_chan_list(mac_handle_t mac_handle, uint8_t *alpha2,
+		enum country_src cc_src);
 QDF_STATUS sme_close(mac_handle_t mac_handle);
 QDF_STATUS sme_start(mac_handle_t mac_handle);
 
@@ -2505,27 +2505,6 @@ sme_set_del_peers_ind_callback(mac_handle_t mac_handle,
  */
 void sme_set_chan_info_callback(mac_handle_t mac_handle,
 			void (*callback)(struct scan_chan_info *chan_info));
-
-#ifdef WLAN_FEATURE_CAL_FAILURE_TRIGGER
-/**
- * sme_set_cal_failure_event_cb() - Register calibration failure event callback
- * @mac_handle - MAC global handle
- * @callback   - calibration failure event callback from HDD
- *
- * This API is invoked by HDD to register its callback to mac
- *
- * Return: None
- */
-void sme_set_cal_failure_event_cb(
-			mac_handle_t mac_handle,
-			void (*callback)(uint8_t cal_type, uint8_t reason));
-#else
-static inline void
-sme_set_cal_failure_event_cb(mac_handle_t mac_handle,
-			     void (*callback)(uint8_t cal_type, uint8_t reason))
-{
-}
-#endif
 
 /**
  * sme_get_rssi_snr_by_bssid() - gets the rssi and snr by bssid from scan cache

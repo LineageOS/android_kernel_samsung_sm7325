@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -1299,12 +1298,6 @@ struct seg_hdr_info {
  *	        Data:1 Mgmt:0
  * @cfr_enable: flag to enable CFR capture
  *              0:disable 1:enable
- * @en_beamforming: flag to enable tx beamforming
- *              0:disable 1:enable
- * @retry_limit_ext: 3 bits of extended retry limit.
- *              Combined with 4 bits "retry_limit"
- *              to create 7 bits hw retry count.
- *              Maximum 127 retries for specific frames.
  */
 struct tx_send_params {
 	uint32_t pwr:8,
@@ -1316,9 +1309,7 @@ struct tx_send_params {
 		 preamble_type:5,
 		 frame_type:1,
 		 cfr_enable:1,
-		 en_beamforming:1,
-		 retry_limit_ext:3,
-		 reserved:6;
+		 reserved:10;
 };
 
 /**
@@ -2655,14 +2646,12 @@ struct set_fwtest_params {
  * @WFA_CONFIG_CSA: configure the driver to ignore CSA
  * @WFA_CONFIG_OCV: configure OCI
  * @WFA_CONFIG_SA_QUERY: configure driver/firmware to ignore SAquery timeout
- * @WFA_FILS_DISCV_FRAMES: FD frames TX enable disable config
  */
 enum wfa_test_cmds {
 	WFA_CONFIG_RXNE,
 	WFA_CONFIG_CSA,
 	WFA_CONFIG_OCV,
 	WFA_CONFIG_SA_QUERY,
-	WFA_FILS_DISCV_FRAMES,
 };
 
 /**
@@ -4699,7 +4688,6 @@ typedef enum {
 #ifdef WLAN_FEATURE_PKT_CAPTURE_V2
 	wmi_vdev_smart_monitor_event_id,
 #endif
-	 wmi_roam_frame_event_id,
 	wmi_events_max,
 } wmi_conv_event_id;
 
@@ -5275,13 +5263,6 @@ typedef enum {
 #ifdef THERMAL_STATS_SUPPORT
 	wmi_service_thermal_stats_temp_range_supported,
 #endif
-	wmi_service_pno_scan_conf_per_ch_support,
-#ifdef WLAN_FEATURE_P2P_P2P_STA
-	wmi_service_p2p_p2p_cc_support,
-#endif
-#ifdef WLAN_FEATURE_ROAM_OFFLOAD
-	wmi_service_5ghz_hi_rssi_roam_support,
- #endif
 	wmi_services_max,
 } wmi_conv_service_ids;
 #define WMI_SERVICE_UNAVAILABLE 0xFFFF
@@ -8134,12 +8115,6 @@ typedef struct {
 	uint32_t counter;
 	uint32_t chain_rssi[WMI_HOST_MAX_CHAINS];
 	uint16_t chain_phase[WMI_HOST_MAX_CHAINS];
-	int32_t cfo_measurement;
-	uint8_t agc_gain[WMI_HOST_MAX_CHAINS];
-	uint32_t rx_start_ts;
-	uint32_t rx_ts_reset;
-	uint32_t mcs_rate;
-	uint32_t gi_type;
 } wmi_cfr_peer_tx_event_param;
 
 /**

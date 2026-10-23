@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2017-2019 The Linux Foundation. All rights reserved.
- * Copyright (c) 2023, 2025 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -36,9 +35,8 @@
 #define P2P_MAX_ROC_DURATION_NON_DBS_NDP_PRESENT  250
 #define P2P_MAX_ROC_DURATION_DBS_NAN_PRESENT      450
 #define P2P_MAX_ROC_DURATION_NON_DBS_NAN_PRESENT  300
-#define P2P_MAX_ROC_DURATION_GO_PRESENT     600
 
-#define P2P_ROC_DURATION_MULTI_GO_PRESENT   300
+#define P2P_ROC_DURATION_MULTI_GO_PRESENT   6
 #define P2P_ROC_DURATION_MULTI_GO_ABSENT    10
 #define P2P_ACTION_FRAME_DEFAULT_WAIT       200
 #define P2P_ROC_DEFAULT_DURATION            200
@@ -81,7 +79,7 @@ enum roc_state {
  * @vdev_id:     Vdev id on which this request has come
  * @scan_id:     Scan id given by scan component for this roc req
  * @tx_ctx:      TX context if this ROC is for tx MGMT
- * @chan_freq:   Chan frequency for which this RoC has been requested
+ * @chan:        Chan for which this RoC has been requested
  * @phy_mode:    PHY mode
  * @duration:    Duration for the RoC
  * @roc_type:    RoC type  User requested or internal
@@ -95,7 +93,7 @@ struct p2p_roc_context {
 	uint32_t vdev_id;
 	uint32_t scan_id;
 	void *tx_ctx;
-	qdf_freq_t chan_freq;
+	uint8_t chan;
 	uint8_t phy_mode;
 	uint32_t duration;
 	enum roc_type roc_type;
@@ -165,9 +163,9 @@ struct p2p_roc_context *p2p_find_roc_by_tx_ctx(
 	struct p2p_soc_priv_obj *p2p_soc_obj, uint64_t cookie);
 
 /**
- * p2p_find_roc_by_chan_freq() - Find out roc context by channel
+ * p2p_find_roc_by_chan() - Find out roc context by channel
  * @p2p_soc_obj: p2p psoc private object
- * @chan_freq: channel frequency of the ROC
+ * @chan: channel of the ROC
  *
  * This function finds out roc context by channel from p2p psoc
  * private object
@@ -175,8 +173,8 @@ struct p2p_roc_context *p2p_find_roc_by_tx_ctx(
  * Return: Pointer to roc context - success
  *         NULL                   - failure
  */
-struct p2p_roc_context *p2p_find_roc_by_chan_freq(
-	struct p2p_soc_priv_obj *p2p_soc_obj, qdf_freq_t chan_freq);
+struct p2p_roc_context *p2p_find_roc_by_chan(
+	struct p2p_soc_priv_obj *p2p_soc_obj, uint8_t chan);
 
 /**
  * p2p_restart_roc_timer() - Restarts roc timer

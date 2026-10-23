@@ -1,6 +1,5 @@
 /*
- * Copyright (c) 2019-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) 2019-2020 The Linux Foundation. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -294,7 +293,7 @@ wlan_cfr_peer_obj_create_handler(struct wlan_objmgr_peer *peer, void *arg)
 	}
 
 	if (wlan_cfr_is_feature_disabled(pdev)) {
-		cfr_debug("cfr is disabled");
+		cfr_info("cfr is disabled");
 		return QDF_STATUS_E_NOSUPPORT;
 	}
 
@@ -511,11 +510,13 @@ QDF_STATUS cfr_stop_indication(struct wlan_objmgr_vdev *vdev)
 		return QDF_STATUS_E_INVAL;
 	}
 
-	/* Don't write stop sting if there is valid cfr_nl_cb. Since
-	 * userspace needn't stop event string
-	 */
-	if (pa->nl_cb.cfr_nl_cb)
+	if (pa->nl_cb.cfr_nl_cb) {
+		pa->nl_cb.cfr_nl_cb(pa->nl_cb.vdev_id, pa->nl_cb.pid,
+				    (const void *)CFR_STOP_STR,
+				    sizeof(CFR_STOP_STR));
+
 		return QDF_STATUS_SUCCESS;
+	}
 
 	status = cfr_streamfs_write(pa, (const void *)CFR_STOP_STR,
 				    sizeof(CFR_STOP_STR));

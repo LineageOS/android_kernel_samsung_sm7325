@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -443,6 +442,8 @@ enum wmamsgtype {
 	WMA_TWT_NUDGE_DIALOG_REQUEST = SIR_HAL_TWT_NUDGE_DIALOG_REQUEST,
 };
 
+#define WMA_DATA_STALL_TRIGGER 0x1006
+
 /* Bit 6 will be used to control BD rate for Management frames */
 #define HAL_USE_BD_RATE2_FOR_MANAGEMENT_FRAME 0x40
 
@@ -738,10 +739,7 @@ QDF_STATUS wma_register_roaming_callbacks(
 			uint8_t *deauth_disassoc_frame,
 			uint16_t deauth_disassoc_frame_len,
 			uint16_t reason_code),
-		csr_roam_pmkid_req_fn_t csr_roam_pmkid_req_cb,
-		QDF_STATUS (*csr_roam_candidate_event_cb)(struct mac_context *mac,
-							  uint8_t *frame,
-							  uint32_t len));
+		csr_roam_pmkid_req_fn_t csr_roam_pmkid_req_cb);
 #else
 static inline QDF_STATUS wma_register_roaming_callbacks(
 		csr_roam_synch_fn_t csr_roam_synch_cb,
@@ -755,10 +753,7 @@ static inline QDF_STATUS wma_register_roaming_callbacks(
 			uint8_t *deauth_disassoc_frame,
 			uint16_t deauth_disassoc_frame_len,
 			uint16_t reason_code),
-		csr_roam_pmkid_req_fn_t csr_roam_pmkid_req_cb,
-		QDF_STATUS (*csr_roam_candidate_event_cb)(struct mac_context *mac,
-							  uint8_t *frame,
-							  uint32_t len))
+		csr_roam_pmkid_req_fn_t csr_roam_pmkid_req_cb)
 {
 	return QDF_STATUS_E_NOSUPPORT;
 }

@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2017-2019 The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -111,9 +110,6 @@ struct wlan_pmo_ctx {
  * @dyn_listen_interval: dynamically user configured listen interval
  * @restore_dtim_setting: DTIM settings restore flag
  * @pmo_vdev_lock: spin lock for pmo vdev priv ctx
- * @dyn_arp_ns_offload_disable: true when arp/ns offload is disable
- * @dyn_arp_ns_offload_rt_lock: wake lock which prevent runtime pm happen if
- *                              arp/ns offload is disable
  */
 struct pmo_vdev_priv_obj {
 	struct pmo_psoc_priv_obj *pmo_psoc_ctx;
@@ -136,10 +132,6 @@ struct pmo_vdev_priv_obj {
 	uint32_t dyn_listen_interval;
 	bool restore_dtim_setting;
 	qdf_spinlock_t pmo_vdev_lock;
-#ifdef FEATURE_WLAN_DYNAMIC_ARP_NS_OFFLOAD
-	bool dyn_arp_ns_offload_disable;
-	qdf_runtime_lock_t dyn_arp_ns_offload_rt_lock;
-#endif
 };
 
 #endif /* WLAN_POWER_MANAGEMENT_OFFLOAD */

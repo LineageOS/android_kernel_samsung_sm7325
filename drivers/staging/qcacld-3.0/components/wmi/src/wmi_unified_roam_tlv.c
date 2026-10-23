@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2013-2021, The Linux Foundation. All rights reserved.
- * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -215,7 +214,6 @@ static QDF_STATUS send_roam_scan_offload_rssi_thresh_cmd_tlv(
 	rssi_threshold_fp->hirssi_upper_bound = roam_req->hi_rssi_scan_rssi_ub;
 	rssi_threshold_fp->rssi_thresh_offset_5g =
 		roam_req->rssi_thresh_offset_5g;
-	rssi_threshold_fp->flags = roam_req->flags;
 
 	buf_ptr += sizeof(wmi_roam_scan_rssi_threshold_fixed_param);
 	WMITLV_SET_HDR(buf_ptr,
@@ -1021,14 +1019,6 @@ static QDF_STATUS send_roam_invoke_cmd_tlv(wmi_unified_t wmi_handle,
 		cmd->flags |=
 			(1 << WMI_ROAM_INVOKE_FLAG_FULL_SCAN_IF_NO_CANDIDATE);
 		cmd->reason = ROAM_INVOKE_REASON_NUD_FAILURE;
-	} else if (qdf_is_macaddr_broadcast((struct qdf_mac_addr *)&roaminvoke->bssid)) {
-		cmd->num_chan = 0;
-		cmd->num_bssid = 0;
-		cmd->roam_scan_mode = WMI_ROAM_INVOKE_SCAN_MODE_CACHE_MAP;
-		cmd->flags |=
-			(1 << WMI_ROAM_INVOKE_FLAG_FULL_SCAN_IF_NO_CANDIDATE) |
-			(1 << WMI_ROAM_INVOKE_FLAG_SELECT_CANDIDATE_CONSIDER_SCORE);
-		cmd->reason = ROAM_INVOKE_REASON_USER_SPACE;
 	} else {
 		cmd->reason = ROAM_INVOKE_REASON_USER_SPACE;
 	}
@@ -2147,8 +2137,6 @@ wmi_fill_rso_tlvs(wmi_unified_t wmi_handle, uint8_t *buf,
 				src_11r_info->is_adaptive_11r;
 			roam_offload_11r->ft_im_for_deauth =
 				src_11r_info->enable_ft_im_roaming;
-			roam_offload_11r->ft_over_ds_enable =
-				src_11r_info->enable_ft_over_ds;
 
 			if (akm == WMI_AUTH_OPEN) {
 				/*
@@ -2333,7 +2321,6 @@ wmi_fill_rso_start_scan_tlv(struct wlan_roam_scan_offload_params *rso_req,
 
 	scan_tlv->dwell_time_active = src_scan_params->dwell_time_active;
 	scan_tlv->dwell_time_passive = src_scan_params->dwell_time_passive;
-	scan_tlv->min_dwell_time_6ghz = src_scan_params->min_dwell_time_6ghz;
 	scan_tlv->burst_duration = src_scan_params->burst_duration;
 	scan_tlv->min_rest_time = src_scan_params->min_rest_time;
 	scan_tlv->max_rest_time = src_scan_params->max_rest_time;
@@ -2344,10 +2331,6 @@ wmi_fill_rso_start_scan_tlv(struct wlan_roam_scan_offload_params *rso_req,
 	scan_tlv->idle_time = src_scan_params->idle_time;
 	scan_tlv->n_probes = src_scan_params->n_probes;
 	scan_tlv->scan_ctrl_flags |= src_scan_params->scan_ctrl_flags;
-	scan_tlv->dwell_time_active_6ghz =
-		src_scan_params->dwell_time_active_6ghz;
-	scan_tlv->dwell_time_passive_6ghz =
-		src_scan_params->dwell_time_passive_6ghz;
 
 	WMI_SCAN_SET_DWELL_MODE(scan_tlv->scan_ctrl_flags,
 				src_scan_params->rso_adaptive_dwell_mode);
@@ -2360,10 +2343,8 @@ wmi_fill_rso_start_scan_tlv(struct wlan_roam_scan_offload_params *rso_req,
 		scan_tlv->scan_ctrl_flags_ext |=
 			WMI_SCAN_DBS_POLICY_DEFAULT;
 
-	wmi_debug("RSO_CFG: dwell time: active %d passive %d, active 6g %d passive 6g %d, minrest %d max rest %d repeat probe time %d probe_spacing:%d",
+	wmi_debug("RSO_CFG: dwell time: active %d passive %d, minrest %d max rest %d repeat probe time %d probe_spacing:%d",
 		  scan_tlv->dwell_time_active, scan_tlv->dwell_time_passive,
-		  scan_tlv->dwell_time_active_6ghz,
-		  scan_tlv->dwell_time_passive_6ghz,
 		  scan_tlv->min_rest_time, scan_tlv->max_rest_time,
 		  scan_tlv->repeat_probe_time, scan_tlv->probe_spacing_time);
 	wmi_debug("RSO_CFG: ctrl_flags:0x%x probe_delay:%d max_scan_time:%d idle_time:%d n_probes:%d",
@@ -2497,11 +2478,9 @@ send_roam_scan_offload_ap_profile_cmd_tlv(wmi_unified_t wmi_handle,
 	wmi_roam_score_delta_param *score_delta_param;
 	wmi_roam_cnd_min_rssi_param *min_rssi_param;
 	enum roam_trigger_reason trig_reason;
-	uint32_t *authmode_list;
-	int i;
 
 	len = sizeof(wmi_roam_ap_profile_fixed_param) + sizeof(wmi_ap_profile);
-	len += sizeof(*score_param) + WMI_TLV_HDR_SIZE + WMI_TLV_HDR_SIZE;
+	len += sizeof(*score_param);
 
 	if (!wmi_service_enabled(wmi_handle,
 			wmi_service_configure_roam_trigger_param_support)) {
@@ -2509,18 +2488,7 @@ send_roam_scan_offload_ap_profile_cmd_tlv(wmi_unified_t wmi_handle,
 		len += NUM_OF_ROAM_TRIGGERS * sizeof(*score_delta_param);
 		len += WMI_TLV_HDR_SIZE;
 		len += NUM_OF_ROAM_MIN_RSSI * sizeof(*min_rssi_param);
-	} else {
-		len += 2 * WMI_TLV_HDR_SIZE;
 	}
-
-	if (ap_profile->profile.num_allowed_authmode) {
-		len += WMI_TLV_HDR_SIZE;
-		len += ap_profile->profile.num_allowed_authmode *
-						sizeof(uint32_t);
-	} else {
-		len += WMI_TLV_HDR_SIZE;
-	}
-
 	buf = wmi_buf_alloc(wmi_handle, len);
 	if (!buf)
 		return QDF_STATUS_E_NOMEM;
@@ -2577,8 +2545,6 @@ send_roam_scan_offload_ap_profile_cmd_tlv(wmi_unified_t wmi_handle,
 	score_param->bw_weightage_pcnt = ap_profile->param.bw_weightage;
 	score_param->band_weightage_pcnt = ap_profile->param.band_weightage;
 	score_param->nss_weightage_pcnt = ap_profile->param.nss_weightage;
-	score_param->security_weightage_pcnt =
-				ap_profile->param.security_weightage;
 	score_param->esp_qbss_weightage_pcnt =
 			ap_profile->param.esp_qbss_weightage;
 	score_param->beamforming_weightage_pcnt =
@@ -2595,7 +2561,7 @@ send_roam_scan_offload_ap_profile_cmd_tlv(wmi_unified_t wmi_handle,
 	score_param->sae_pk_ap_weightage_pcnt =
 				ap_profile->param.sae_pk_ap_weightage;
 
-	wmi_debug("Score params weightage: disable_bitmap %x rssi %d ht %d vht %d he %d BW %d band %d NSS %d ESP %d BF %d PCL %d OCE WAN %d APTX %d roam score algo %d subnet id %d sae-pk %d security %d",
+	wmi_debug("Score params weightage: disable_bitmap %x rssi %d ht %d vht %d he %d BW %d band %d NSS %d ESP %d BF %d PCL %d OCE WAN %d APTX %d roam score algo %d subnet id %d sae-pk %d",
 		 score_param->disable_bitmap, score_param->rssi_weightage_pcnt,
 		 score_param->ht_weightage_pcnt,
 		 score_param->vht_weightage_pcnt,
@@ -2609,22 +2575,18 @@ send_roam_scan_offload_ap_profile_cmd_tlv(wmi_unified_t wmi_handle,
 		 score_param->oce_ap_tx_pwr_weightage_pcnt,
 		 score_param->vendor_roam_score_algorithm_id,
 		 score_param->oce_ap_subnet_id_weightage_pcnt,
-		 score_param->sae_pk_ap_weightage_pcnt,
-		 score_param->security_weightage_pcnt);
+		 score_param->sae_pk_ap_weightage_pcnt);
 
 	score_param->bw_scoring.score_pcnt = ap_profile->param.bw_index_score;
 	score_param->band_scoring.score_pcnt =
 			ap_profile->param.band_index_score;
 	score_param->nss_scoring.score_pcnt =
 			ap_profile->param.nss_index_score;
-	score_param->security_scoring.score_pcnt =
-			ap_profile->param.security_index_score;
 
-	wmi_debug("bw_index_score %x band_index_score %x nss_index_score %x security_index_score %x",
+	wmi_debug("bw_index_score %x band_index_score %x nss_index_score %x",
 		  score_param->bw_scoring.score_pcnt,
 		  score_param->band_scoring.score_pcnt,
-		  score_param->nss_scoring.score_pcnt,
-		  score_param->security_scoring.score_pcnt);
+		  score_param->nss_scoring.score_pcnt);
 
 	score_param->rssi_scoring.best_rssi_threshold =
 		(-1) * ap_profile->param.rssi_scoring.best_rssi_threshold;
@@ -2770,58 +2732,7 @@ send_roam_scan_offload_ap_profile_cmd_tlv(wmi_unified_t wmi_handle,
 			convert_roam_trigger_reason(trig_reason);
 		min_rssi_param->candidate_min_rssi =
 			ap_profile->min_rssi_params[MIN_RSSI_2G_TO_5G_ROAM].min_rssi;
-
-		buf_ptr += sizeof(*min_rssi_param);
-	} else {
-		/* set zero TLV's for roam_score_delta_param_list */
-		WMITLV_SET_HDR(buf_ptr, WMITLV_TAG_ARRAY_STRUC,
-			       WMITLV_GET_STRUCT_TLVLEN(0));
-		buf_ptr += WMI_TLV_HDR_SIZE;
-
-		/* set zero TLV's for roam_cnd_min_rssi_param_list */
-		WMITLV_SET_HDR(buf_ptr, WMITLV_TAG_ARRAY_STRUC,
-			       WMITLV_GET_STRUCT_TLVLEN(0));
-		buf_ptr += WMI_TLV_HDR_SIZE;
 	}
-
-	/* set zero TLV's for roam_cnd_vendor_scoring_param */
-	WMITLV_SET_HDR(buf_ptr, WMITLV_TAG_ARRAY_STRUC,
-		       WMITLV_GET_STRUCT_TLVLEN(0));
-	buf_ptr += WMI_TLV_HDR_SIZE;
-
-	/* set zero TLV's for owe_ap_profile */
-	WMITLV_SET_HDR(buf_ptr, WMITLV_TAG_ARRAY_STRUC,
-		       WMITLV_GET_STRUCT_TLVLEN(0));
-	buf_ptr += WMI_TLV_HDR_SIZE;
-
-	/* List of Allowed authmode other than the connected akm */
-	if (ap_profile->profile.num_allowed_authmode) {
-		WMITLV_SET_HDR(buf_ptr, WMITLV_TAG_ARRAY_UINT32,
-			       (ap_profile->profile.num_allowed_authmode *
-			       sizeof(uint32_t)));
-
-		buf_ptr += WMI_TLV_HDR_SIZE;
-
-		authmode_list = (uint32_t *)buf_ptr;
-		for (i = 0; i < ap_profile->profile.num_allowed_authmode; i++)
-			authmode_list[i] =
-				ap_profile->profile.allowed_authmode[i];
-
-		wmi_debug("[Allowed Authmode]: num_allowed_authmode: %d",
-			  ap_profile->profile.num_allowed_authmode);
-		QDF_TRACE_HEX_DUMP(QDF_MODULE_ID_WMI, QDF_TRACE_LEVEL_DEBUG,
-				   authmode_list,
-				   ap_profile->profile.num_allowed_authmode *
-				   sizeof(uint32_t));
-		buf_ptr += ap_profile->profile.num_allowed_authmode *
-			   sizeof(uint32_t);
-	} else {
-		/* set zero TLV's for allowed_authmode */
-		WMITLV_SET_HDR(buf_ptr, WMITLV_TAG_ARRAY_STRUC,
-			       WMITLV_GET_STRUCT_TLVLEN(0));
-		buf_ptr += WMI_TLV_HDR_SIZE;
-	}
-
 	wmi_mtrace(WMI_ROAM_AP_PROFILE, NO_SESSION, 0);
 	status = wmi_unified_cmd_send(wmi_handle, buf,
 				      len, WMI_ROAM_AP_PROFILE);

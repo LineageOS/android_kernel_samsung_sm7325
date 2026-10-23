@@ -1,6 +1,5 @@
 /*
  * Copyright (c) 2012-2020 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -185,7 +184,6 @@ void populate_dot_11_f_ext_chann_switch_ann(struct mac_context *mac_ptr,
 	uint32_t sw_target_freq;
 	uint8_t primary_channel;
 	enum phy_ch_width ch_width;
-	uint8_t reg_cc[REG_ALPHA2_LEN + 1];
 
 	ch_width = session_entry->gLimChannelSwitch.ch_width;
 	ch_offset = session_entry->gLimChannelSwitch.sec_ch_offset;
@@ -202,9 +200,8 @@ void populate_dot_11_f_ext_chann_switch_ann(struct mac_context *mac_ptr,
 		session_entry->gLimChannelSwitch.switchCount;
 	dot_11_ptr->present = 1;
 
-	wlan_reg_read_current_country(mac_ptr->psoc, reg_cc);
 	pe_debug("country:%s chan:%d freq %d width:%d reg:%d off:%d",
-		 reg_cc,
+		 mac_ptr->scan.countryCodeCurrent,
 		 session_entry->gLimChannelSwitch.primaryChannel,
 		 sw_target_freq,
 		 session_entry->gLimChannelSwitch.ch_width,
@@ -831,7 +828,7 @@ populate_dot11f_ext_supp_rates(struct mac_context *mac, uint8_t nChannelNum,
 			       struct pe_session *pe_session)
 {
 	QDF_STATUS nsir_status;
-	qdf_size_t n_rates = 0;
+	qdf_size_t nRates = 0;
 	uint8_t rates[WLAN_SUPPORTED_RATES_IE_MAX_LEN];
 
 	/* Use the ext rates present in session entry whenever nChannelNum is set to OPERATIONAL
@@ -840,9 +837,9 @@ populate_dot11f_ext_supp_rates(struct mac_context *mac, uint8_t nChannelNum,
 	 */
 	if (POPULATE_DOT11F_RATES_OPERATIONAL == nChannelNum) {
 		if (pe_session) {
-			n_rates = pe_session->extRateSet.numRates;
+			nRates = pe_session->extRateSet.numRates;
 			qdf_mem_copy(rates, pe_session->extRateSet.rate,
-				     n_rates);
+				     nRates);
 		} else {
 			pe_err("no session context exists while populating Operational Rate Set");
 		}
@@ -851,21 +848,20 @@ populate_dot11f_ext_supp_rates(struct mac_context *mac, uint8_t nChannelNum,
 			pe_err("null pe_session");
 			return QDF_STATUS_E_INVAL;
 		}
-		n_rates = WLAN_SUPPORTED_RATES_IE_MAX_LEN;
+		nRates = WLAN_SUPPORTED_RATES_IE_MAX_LEN;
 		nsir_status = mlme_get_ext_opr_rate(pe_session->vdev, rates,
-						    &n_rates);
+						    &nRates);
 		if (QDF_IS_STATUS_ERROR(nsir_status)) {
-			n_rates = 0;
+			nRates = 0;
 			pe_err("Failed to retrieve nItem from CFG status: %d",
 			       (nsir_status));
 			return nsir_status;
 		}
 	}
 
-	if (0 != n_rates) {
-		pe_debug("ext supp rates present, num %d", (uint8_t)n_rates);
-		pDot11f->num_rates = (uint8_t)n_rates;
-		qdf_mem_copy(pDot11f->rates, rates, n_rates);
+	if (0 != nRates) {
+		pDot11f->num_rates = (uint8_t) nRates;
+		qdf_mem_copy(pDot11f->rates, rates, nRates);
 		pDot11f->present = 1;
 	}
 
@@ -915,7 +911,7 @@ populate_dot11f_ht_caps(struct mac_context *mac,
 {
 	qdf_size_t ncfglen;
 	QDF_STATUS nSirStatus;
-	uint8_t disable_high_ht_mcs_2x2 = 0, cb_mode;
+	uint8_t disable_high_ht_mcs_2x2 = 0;
 	struct ch_params ch_params = {0};
 
 	tSirMacTxBFCapabilityInfo *pTxBFCapabilityInfo;
@@ -945,11 +941,10 @@ populate_dot11f_ht_caps(struct mac_context *mac,
 		pDot11f->shortGI20MHz = ht_cap_info->short_gi_20_mhz;
 		pDot11f->shortGI40MHz = ht_cap_info->short_gi_40_mhz;
 	} else {
-		cb_mode = lim_get_cb_mode_for_freq(mac, pe_session,
-						   pe_session->curr_op_freq);
 		if (WLAN_REG_IS_24GHZ_CH_FREQ(pe_session->curr_op_freq) &&
 		    LIM_IS_STA_ROLE(pe_session) &&
-		    cb_mode != WNI_CFG_CHANNEL_BONDING_MODE_DISABLE) {
+		    WNI_CFG_CHANNEL_BONDING_MODE_DISABLE !=
+		    mac->roam.configParam.channelBondingMode24GHz) {
 			pDot11f->supportedChannelWidthSet = 1;
 			ch_params.ch_width = CH_WIDTH_40MHZ;
 			wlan_reg_set_channel_params_for_freq(
@@ -1193,13 +1188,6 @@ populate_dot11f_vht_caps(struct mac_context *mac,
 		if (lim_is_he_6ghz_band(pe_session)) {
 			pDot11f->present = 0;
 			return QDF_STATUS_SUCCESS;
-		}
-
-		if (wlan_reg_is_24ghz_ch_freq(pe_session->curr_op_freq)) {
-			pDot11f->supportedChannelWidthSet = 0;
-		} else {
-			if (pe_session->ch_width <= CH_WIDTH_80MHZ)
-				pDot11f->supportedChannelWidthSet = 0;
 		}
 
 		if (pe_session->ht_config.ht_rx_ldpc)
@@ -3444,9 +3432,9 @@ sir_convert_assoc_resp_frame2_struct(struct mac_context *mac,
 	 */
 	auth_type = session_entry->connected_akm;
 	sha384_akm = lim_is_sha384_akm(auth_type);
-	ie_ptr = frame + FIXED_PARAM_OFFSET_ASSOC_RSP;
-	ie_len = frame_len - FIXED_PARAM_OFFSET_ASSOC_RSP;
 	if (sha384_akm) {
+		ie_ptr = frame + FIXED_PARAM_OFFSET_ASSOC_RSP;
+		ie_len = frame_len - FIXED_PARAM_OFFSET_ASSOC_RSP;
 		qdf_status = wlan_parse_ftie_sha384(ie_ptr, ie_len, pAssocRsp);
 		if (QDF_IS_STATUS_ERROR(qdf_status)) {
 			pe_err("FT IE parsing failed status:%d", status);
@@ -3522,10 +3510,6 @@ sir_convert_assoc_resp_frame2_struct(struct mac_context *mac,
 			ext_cap->fine_time_meas_responder);
 	}
 
-	if (ar->OperatingMode.present) {
-		qdf_mem_copy(&pAssocRsp->oper_mode_ntf, &ar->OperatingMode,
-			     sizeof(tDot11fIEOperatingMode));
-	}
 	if (ar->QosMapSet.present) {
 		pAssocRsp->QosMapSet.present = 1;
 		convert_qos_mapset_frame(mac, &pAssocRsp->QosMapSet,
@@ -6408,16 +6392,6 @@ QDF_STATUS populate_dot11f_he_caps(struct mac_context *mac_ctx, struct pe_sessio
 	}
 	populate_dot11f_twt_he_cap(mac_ctx, session, he_cap);
 
-	if (wlan_reg_is_5ghz_ch_freq(session->curr_op_freq) ||
-	    wlan_reg_is_6ghz_chan_freq(session->curr_op_freq)) {
-		if (session->ch_width <= CH_WIDTH_80MHZ) {
-			he_cap->chan_width_2 = 0;
-			he_cap->chan_width_3 = 0;
-		} else if (session->ch_width == CH_WIDTH_160MHZ) {
-			he_cap->chan_width_3 = 0;
-		}
-	}
-
 	return QDF_STATUS_SUCCESS;
 }
 
@@ -6542,7 +6516,6 @@ QDF_STATUS populate_dot11f_twt_extended_caps(struct mac_context *mac_ctx,
 
 	dot11f->num_bytes = DOT11F_IE_EXTCAP_MAX_LEN;
 	p_ext_cap = (struct s_ext_cap *)dot11f->bytes;
-	dot11f->present = 1;
 
 	if (pe_session->opmode == QDF_STA_MODE)
 		p_ext_cap->twt_requestor_support =
@@ -6555,10 +6528,6 @@ QDF_STATUS populate_dot11f_twt_extended_caps(struct mac_context *mac_ctx,
 			mac_ctx->mlme_cfg->twt_cfg.res_flag;
 
 	dot11f->num_bytes = lim_compute_ext_cap_ie_length(dot11f);
-	if (!dot11f->num_bytes) {
-		dot11f->present = 0;
-		pe_debug("ext ie length become 0, disable the ext caps");
-	}
 
 	return QDF_STATUS_SUCCESS;
 }
@@ -6574,7 +6543,6 @@ QDF_STATUS populate_dot11f_btm_extended_caps(struct mac_context *mac_ctx,
 	pe_debug("enter");
 	dot11f->num_bytes = DOT11F_IE_EXTCAP_MAX_LEN;
 	p_ext_cap = (struct s_ext_cap *)dot11f->bytes;
-	dot11f->present = 1;
 
 	status = cm_akm_roam_allowed(mac_ctx, pe_session->vdev_id);
 	if (QDF_IS_STATUS_ERROR(status)) {
@@ -6583,10 +6551,6 @@ QDF_STATUS populate_dot11f_btm_extended_caps(struct mac_context *mac_ctx,
 	}
 
 	dot11f->num_bytes = lim_compute_ext_cap_ie_length(dot11f);
-	if (!dot11f->num_bytes) {
-		dot11f->present = 0;
-		pe_debug("ext ie length become 0, disable the ext caps");
-	}
 
 	return QDF_STATUS_SUCCESS;
 }
