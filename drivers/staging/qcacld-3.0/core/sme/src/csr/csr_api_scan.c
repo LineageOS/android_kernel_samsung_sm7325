@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2011-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -565,8 +566,7 @@ void csr_apply_power2_current(struct mac_context *mac)
 }
 
 void csr_apply_channel_power_info_to_fw(struct mac_context *mac_ctx,
-					struct csr_channel *ch_lst,
-					uint8_t *countryCode)
+					struct csr_channel *ch_lst)
 {
 	int i;
 	uint8_t num_ch = 0;
@@ -597,6 +597,7 @@ static void csr_diag_reset_country_information(struct mac_context *mac)
 
 	host_log_802_11d_pkt_type *p11dLog;
 	int Index;
+	uint8_t reg_cc[REG_ALPHA2_LEN + 1];
 
 	WLAN_HOST_DIAG_LOG_ALLOC(p11dLog, host_log_802_11d_pkt_type,
 				 LOG_WLAN_80211D_C);
@@ -604,7 +605,8 @@ static void csr_diag_reset_country_information(struct mac_context *mac)
 		return;
 
 	p11dLog->eventId = WLAN_80211D_EVENT_RESET;
-	qdf_mem_copy(p11dLog->countryCode, mac->scan.countryCodeCurrent, 3);
+	wlan_reg_read_current_country(mac->psoc, reg_cc);
+	qdf_mem_copy(p11dLog->countryCode, reg_cc, 3);
 	p11dLog->numChannel = mac->scan.base_channels.numChannels;
 	if (p11dLog->numChannel <= HOST_LOG_MAX_NUM_CHANNEL) {
 		for (Index = 0;
@@ -639,8 +641,7 @@ void csr_apply_channel_power_info_wrapper(struct mac_context *mac)
 	csr_save_channel_power_for_band(mac, false);
 	csr_save_channel_power_for_band(mac, true);
 	/* apply the channel list, power settings, and the country code. */
-	csr_apply_channel_power_info_to_fw(mac,
-		&mac->scan.base_channels, mac->scan.countryCodeCurrent);
+	csr_apply_channel_power_info_to_fw(mac, &mac->scan.base_channels);
 	/* clear the 11d channel list */
 	qdf_mem_zero(&mac->scan.channels11d, sizeof(mac->scan.channels11d));
 }
@@ -845,6 +846,7 @@ bool csr_learn_11dcountry_information(struct mac_context *mac,
 	v_REGDOMAIN_t domainId;
 	tDot11fBeaconIEs *pIesLocal = pIes;
 	bool useVoting = false;
+	uint8_t reg_cc[REG_ALPHA2_LEN + 1];
 
 	if ((!pSirBssDesc) && (!pIes))
 		useVoting = true;
@@ -876,10 +878,11 @@ bool csr_learn_11dcountry_information(struct mac_context *mac,
 	else
 		pCountryCodeSelected = mac->scan.countryCodeElected;
 
-	if (qdf_mem_cmp(pCountryCodeSelected, mac->scan.countryCodeCurrent,
+	wlan_reg_read_current_country(mac->psoc, reg_cc);
+	if (qdf_mem_cmp(pCountryCodeSelected, reg_cc,
 			CDS_COUNTRY_CODE_LEN) == 0) {
 		qdf_mem_copy(mac->scan.countryCode11d,
-			     mac->scan.countryCodeCurrent,
+			     reg_cc,
 			     CDS_COUNTRY_CODE_LEN);
 		goto free_ie;
 	}
@@ -1392,6 +1395,15 @@ QDF_STATUS csr_scan_for_ssid(struct mac_context *mac_ctx, uint32_t session_id,
 			}
 		}
 		req->scan_req.chan_list.num_chan = num_chan;
+	}
+
+	/* Add freq hint for scan for ssid */
+	if (!num_chan && profile->freq_hint &&
+	    csr_roam_is_valid_channel(mac_ctx, profile->freq_hint)) {
+		sme_debug("add freq hint %d", profile->freq_hint);
+		req->scan_req.chan_list.chan[0].freq =
+						profile->freq_hint;
+		req->scan_req.chan_list.num_chan = 1;
 	}
 
 	/* Extend it for multiple SSID */
@@ -2099,38 +2111,55 @@ static void csr_update_bss_with_fils_data(struct mac_context *mac_ctx,
 					  struct bss_description *bss_descr)
 {
 	int ret;
-	tDot11fIEfils_indication fils_indication = {0};
-	struct sir_fils_indication fils_ind;
+	tDot11fIEfils_indication *fils_indication;
+	struct sir_fils_indication *fils_ind;
 
 	if (!scan_entry->ie_list.fils_indication)
 		return;
+
+	fils_indication = qdf_mem_malloc(sizeof(*fils_indication));
+	if (!fils_indication) {
+		sme_err("malloc failed for fils_indication");
+		return;
+	}
 
 	ret = dot11f_unpack_ie_fils_indication(mac_ctx,
 				scan_entry->ie_list.fils_indication +
 				SIR_FILS_IND_ELEM_OFFSET,
 				*(scan_entry->ie_list.fils_indication + 1),
-				&fils_indication, false);
+				fils_indication, false);
 	if (DOT11F_FAILED(ret)) {
 		sme_err("unpack failed ret: 0x%x", ret);
+		qdf_mem_free(fils_indication);
 		return;
 	}
 
-	update_fils_data(&fils_ind, &fils_indication);
-	if (fils_ind.realm_identifier.realm_cnt > SIR_MAX_REALM_COUNT)
-		fils_ind.realm_identifier.realm_cnt = SIR_MAX_REALM_COUNT;
+	fils_ind = qdf_mem_malloc(sizeof(*fils_ind));
+	if (!fils_ind) {
+		sme_err("malloc failed for fils_ind");
+		qdf_mem_free(fils_indication);
+		return;
+	}
+
+	update_fils_data(fils_ind, fils_indication);
+	if (fils_ind->realm_identifier.realm_cnt > SIR_MAX_REALM_COUNT)
+		fils_ind->realm_identifier.realm_cnt = SIR_MAX_REALM_COUNT;
 
 	bss_descr->fils_info_element.realm_cnt =
-		fils_ind.realm_identifier.realm_cnt;
+		fils_ind->realm_identifier.realm_cnt;
 	qdf_mem_copy(bss_descr->fils_info_element.realm,
-			fils_ind.realm_identifier.realm,
+			fils_ind->realm_identifier.realm,
 			bss_descr->fils_info_element.realm_cnt * SIR_REALM_LEN);
-	if (fils_ind.cache_identifier.is_present) {
+	if (fils_ind->cache_identifier.is_present) {
 		bss_descr->fils_info_element.is_cache_id_present = true;
 		qdf_mem_copy(bss_descr->fils_info_element.cache_id,
-			fils_ind.cache_identifier.identifier, CACHE_ID_LEN);
+			fils_ind->cache_identifier.identifier, CACHE_ID_LEN);
 	}
-	if (fils_ind.is_fils_sk_auth_supported)
+	if (fils_ind->is_fils_sk_auth_supported)
 		bss_descr->fils_info_element.is_fils_sk_supported = true;
+
+	 qdf_mem_free(fils_ind);
+	 qdf_mem_free(fils_indication);
 }
 #else
 static void csr_update_bss_with_fils_data(struct mac_context *mac_ctx,
@@ -2611,8 +2640,7 @@ void csr_init_occupied_channels_list(struct mac_context *mac_ctx,
 	struct wlan_channel *chan;
 	struct wlan_objmgr_vdev *vdev;
 
-	tpCsrNeighborRoamControlInfo neighbor_roam_info =
-		&mac_ctx->roam.neighborRoamInfo[sessionId];
+	tpCsrNeighborRoamControlInfo neighbor_roam_info;
 	tCsrRoamConnectedProfile *profile = NULL;
 	QDF_STATUS status;
 
@@ -2621,6 +2649,7 @@ void csr_init_occupied_channels_list(struct mac_context *mac_ctx,
 		sme_debug("Invalid session");
 		return;
 	}
+	neighbor_roam_info = &mac_ctx->roam.neighborRoamInfo[sessionId];
 	if (neighbor_roam_info->cfgParams.specific_chan_info.numOfChannels) {
 		/*
 		 * Ini file contains neighbor scan channel list, hence NO need

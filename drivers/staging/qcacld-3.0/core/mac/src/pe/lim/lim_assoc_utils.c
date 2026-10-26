@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2011-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -1587,6 +1588,41 @@ static bool lim_check_valid_mcs_for_nss(struct pe_session *session,
 }
 #endif
 
+/**
+ * lim_remove_membership_selectors() - remove elements from rate set
+ *
+ * @rate_set: pointer to rate set
+ *
+ * Removes the BSS membership selector elements from the rate set, and keep
+ * only the rates
+ *
+ * Return: none
+ */
+static void lim_remove_membership_selectors(tSirMacRateSet *rate_set)
+{
+	int i, selector_count = 0;
+
+	for (i = 0; i < rate_set->numRates; i++) {
+		if ((rate_set->rate[i] == (WLAN_BASIC_RATE_MASK |
+				WLAN_BSS_MEMBERSHIP_SELECTOR_HT_PHY)) ||
+		    (rate_set->rate[i] == (WLAN_BASIC_RATE_MASK |
+				WLAN_BSS_MEMBERSHIP_SELECTOR_VHT_PHY)) ||
+		    (rate_set->rate[i] == (WLAN_BASIC_RATE_MASK |
+				WLAN_BSS_MEMBERSHIP_SELECTOR_GLK)) ||
+		    (rate_set->rate[i] == (WLAN_BASIC_RATE_MASK |
+				WLAN_BSS_MEMBERSHIP_SELECTOR_EPD)) ||
+		    (rate_set->rate[i] == (WLAN_BASIC_RATE_MASK |
+				WLAN_BSS_MEMBERSHIP_SELECTOR_SAE_H2E)) ||
+		    (rate_set->rate[i] == (WLAN_BASIC_RATE_MASK |
+				WLAN_BSS_MEMBERSHIP_SELECTOR_HE_PHY)))
+			selector_count++;
+
+		if (i + selector_count < rate_set->numRates)
+			rate_set->rate[i] = rate_set->rate[i + selector_count];
+	}
+	rate_set->numRates -= selector_count;
+}
+
 QDF_STATUS lim_populate_peer_rate_set(struct mac_context *mac,
 				      struct supported_rates *pRates,
 				      uint8_t *pSupportedMCSSet,
@@ -1635,6 +1671,10 @@ QDF_STATUS lim_populate_peer_rate_set(struct mac_context *mac,
 		}
 	} else
 		tempRateSet2.numRates = 0;
+
+	lim_remove_membership_selectors(&tempRateSet);
+	lim_remove_membership_selectors(&tempRateSet2);
+
 	if ((tempRateSet.numRates + tempRateSet2.numRates) >
 	    WLAN_SUPPORTED_RATES_IE_MAX_LEN) {
 		pe_err("more than 12 rates in CFG");
@@ -1794,8 +1834,8 @@ QDF_STATUS lim_populate_peer_rate_set(struct mac_context *mac,
  * in IBSS role to process the CFG rate sets and
  * the rate sets received in the Assoc request on AP
  *
- * 1. It makes the intersection between our own rate Sat
- *    and extemcded rate set and the ones received in the
+ * 1. It makes the intersection between our own rate set
+ *    and extended rate set and the ones received in the
  *    association request.
  * 2. It creates a combined rate set of 12 rates max which
  *    comprised the basic and extended rates
@@ -1845,13 +1885,16 @@ QDF_STATUS lim_populate_matching_rate_set(struct mac_context *mac_ctx,
 		temp_rate_set2.numRates = 0;
 	}
 
+	lim_remove_membership_selectors(&temp_rate_set);
+	lim_remove_membership_selectors(&temp_rate_set2);
+
 	/*
 	 * absolute sum of both num_rates should be less than 12. following
-	 * 16-bit sum avoids false codition where 8-bit arthematic overflow
+	 * 16-bit sum avoids false condition where 8-bit arithmetic overflow
 	 * might have caused total sum to be less than 12
 	 */
 	if (((uint16_t)temp_rate_set.numRates +
-		(uint16_t)temp_rate_set2.numRates) > 12) {
+	    (uint16_t)temp_rate_set2.numRates) > SIR_MAC_MAX_NUMBER_OF_RATES) {
 		pe_err("more than 12 rates in CFG");
 		return QDF_STATUS_E_FAILURE;
 	}
@@ -2509,9 +2552,11 @@ lim_add_sta(struct mac_context *mac_ctx,
 			assoc_req =
 			(tpSirAssocReq) session_entry->parsedAssocReq[aid];
 
-			add_sta_params->wpa_rsn = assoc_req->rsnPresent;
-			add_sta_params->wpa_rsn |=
-				(assoc_req->wpaPresent << 1);
+			if (assoc_req) {
+				add_sta_params->wpa_rsn = assoc_req->rsnPresent;
+				add_sta_params->wpa_rsn |=
+					(assoc_req->wpaPresent << 1);
+			}
 		}
 	}
 
@@ -3365,30 +3410,30 @@ void lim_update_vhtcaps_assoc_resp(struct mac_context *mac_ctx,
  * lim_update_vht_oper_assoc_resp : Update VHT Operations in assoc response.
  * @mac_ctx Pointer to Global MAC structure
  * @pAddBssParams: parameters required for add bss params.
+ * @vht_caps: VHT CAP IE to update.
  * @vht_oper: VHT Operations to update.
+ * @ht_info: HT Info IE to update.
  * @pe_session : session entry.
  *
  * Return : void
  */
 static void lim_update_vht_oper_assoc_resp(struct mac_context *mac_ctx,
 		struct bss_params *pAddBssParams,
-		tDot11fIEVHTOperation *vht_oper, struct pe_session *pe_session)
+		tDot11fIEVHTCaps *vht_caps, tDot11fIEVHTOperation *vht_oper,
+		tDot11fIEHTInfo *ht_info, struct pe_session *pe_session)
 {
-	int16_t ccfs0 = vht_oper->chan_center_freq_seg0;
-	int16_t ccfs1 = vht_oper->chan_center_freq_seg1;
-	int16_t offset = abs((ccfs0 -  ccfs1));
 	uint8_t ch_width;
 
 	ch_width = pAddBssParams->ch_width;
-	if (vht_oper->chanWidth && pe_session->ch_width) {
-		ch_width = CH_WIDTH_80MHZ;
-		if (ccfs1 && offset == 8)
-			ch_width = CH_WIDTH_160MHZ;
-		else if (ccfs1 && offset > 16)
-			ch_width = CH_WIDTH_80P80MHZ;
-	}
+
+	if (vht_oper->chanWidth == WNI_CFG_VHT_CHANNEL_WIDTH_80MHZ &&
+	    pe_session->ch_width)
+		ch_width =
+			lim_get_vht_ch_width(vht_caps, vht_oper, ht_info) + 1;
+
 	if (ch_width > pe_session->ch_width)
 		ch_width = pe_session->ch_width;
+
 	pAddBssParams->ch_width = ch_width;
 	pAddBssParams->staContext.ch_width = ch_width;
 }
@@ -3489,6 +3534,28 @@ QDF_STATUS lim_sta_send_add_bss(struct mac_context *mac, tpSirAssocRsp pAssocRsp
 						    &pAssocRsp->HTInfo,
 						    chan_width_support,
 						    pAddBssParams);
+		/**
+		 * in limExtractApCapability function intersection of FW
+		 * advertised channel width and AP advertised channel
+		 * width has been taken into account for calculating
+		 * pe_session->ch_width
+		 */
+
+		if (chan_width_support &&
+		    ((pAssocRsp->HTCaps.present &&
+		      pAssocRsp->HTCaps.supportedChannelWidthSet) ||
+		    (pBeaconStruct->HTCaps.present &&
+		     pBeaconStruct->HTCaps.supportedChannelWidthSet))) {
+			pAddBssParams->ch_width =
+						pe_session->ch_width;
+			pAddBssParams->staContext.ch_width =
+						pe_session->ch_width;
+		} else {
+			pAddBssParams->ch_width = CH_WIDTH_20MHZ;
+			pAddBssParams->staContext.ch_width = CH_WIDTH_20MHZ;
+			if (!vht_cap_info->enable_txbf_20mhz)
+				pAddBssParams->staContext.vhtTxBFCapable = 0;
+		}
 	}
 
 	if (pe_session->vhtCapability && (pAssocRsp->VHTCaps.present)) {
@@ -3508,7 +3575,9 @@ QDF_STATUS lim_sta_send_add_bss(struct mac_context *mac, tpSirAssocRsp pAssocRsp
 	if (pAddBssParams->vhtCapable) {
 		if (vht_oper)
 			lim_update_vht_oper_assoc_resp(mac, pAddBssParams,
-					vht_oper, pe_session);
+						       vht_caps, vht_oper,
+						       &pAssocRsp->HTInfo,
+						       pe_session);
 		if (vht_caps)
 			lim_update_vhtcaps_assoc_resp(mac, pAddBssParams,
 					vht_caps, pe_session);
@@ -3617,26 +3686,6 @@ QDF_STATUS lim_sta_send_add_bss(struct mac_context *mac, tpSirAssocRsp pAssocRsp
 			lim_update_he_stbc_capable(&pAddBssParams->staContext);
 			lim_update_he_mcs_12_13(&pAddBssParams->staContext,
 						sta);
-		}
-
-		/*
-		 * in limExtractApCapability function intersection of FW
-		 * advertised channel width and AP advertised channel
-		 * width has been taken into account for calculating
-		 * pe_session->ch_width
-		 */
-		if (chan_width_support &&
-		    ((pAssocRsp->HTCaps.supportedChannelWidthSet) ||
-		    (pBeaconStruct->HTCaps.supportedChannelWidthSet))) {
-			pAddBssParams->ch_width =
-					pe_session->ch_width;
-			pAddBssParams->staContext.ch_width =
-					pe_session->ch_width;
-		} else {
-			pAddBssParams->ch_width = CH_WIDTH_20MHZ;
-			sta_context->ch_width =	CH_WIDTH_20MHZ;
-			if (!vht_cap_info->enable_txbf_20mhz)
-				sta_context->vhtTxBFCapable = 0;
 		}
 
 		pAddBssParams->staContext.mimoPS =

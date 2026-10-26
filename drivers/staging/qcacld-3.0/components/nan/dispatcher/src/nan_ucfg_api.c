@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -33,6 +34,8 @@
 #include "cfg_ucfg_api.h"
 #include "cfg_nan.h"
 #include "wlan_mlme_api.h"
+#include "cfg_nan_api.h"
+#include "wlan_tdls_ucfg_api.h"
 
 struct wlan_objmgr_psoc;
 struct wlan_objmgr_vdev;
@@ -181,6 +184,127 @@ inline QDF_STATUS ucfg_nan_set_active_peers(struct wlan_objmgr_vdev *vdev,
 	qdf_spin_unlock_bh(&priv_obj->lock);
 
 	return QDF_STATUS_SUCCESS;
+}
+
+/**
+ * ucfg_nan_update_mc_list() - update the multicast list
+ * @vdev: Pointer to VDEV Object
+ *
+ * This function will update the multicast list for NDP peer
+ */
+static void ucfg_nan_update_mc_list(struct wlan_objmgr_vdev *vdev)
+{
+	struct nan_callbacks cb_obj;
+	QDF_STATUS status;
+	struct wlan_objmgr_psoc *psoc = wlan_vdev_get_psoc(vdev);
+
+	if (!psoc) {
+		nan_err("psoc is null");
+		return;
+	}
+
+	status = ucfg_nan_get_callbacks(psoc, &cb_obj);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		nan_err("Couldn't get callback object");
+		return;
+	}
+
+	if (!cb_obj.set_mc_list) {
+		nan_err("set_mc_list callback not registered");
+		return;
+	}
+
+	cb_obj.set_mc_list(vdev);
+}
+
+inline void ucfg_nan_set_peer_mc_list(struct wlan_objmgr_vdev *vdev,
+				      struct qdf_mac_addr peer_mac_addr)
+{
+	struct nan_vdev_priv_obj *priv_obj = nan_get_vdev_priv_obj(vdev);
+	uint32_t max_ndp_sessions = 0;
+	struct wlan_objmgr_psoc *psoc = wlan_vdev_get_psoc(vdev);
+	int i, list_idx = 0;
+
+	if (!priv_obj) {
+		nan_err("priv_obj is null");
+		return;
+	}
+
+	if (!psoc) {
+		nan_err("psoc is null");
+		return;
+	}
+
+	cfg_nan_get_ndp_max_sessions(psoc, &max_ndp_sessions);
+
+	qdf_spin_lock_bh(&priv_obj->lock);
+	for (i = 0; i < max_ndp_sessions; i++) {
+		if (qdf_is_macaddr_zero(&priv_obj->peer_mc_addr_list[i])) {
+			list_idx = i;
+			break;
+		}
+	}
+	if (list_idx == max_ndp_sessions) {
+		nan_err("Peer multicast address list is full");
+		qdf_spin_unlock_bh(&priv_obj->lock);
+	}
+	/* Derive peer multicast addr */
+	peer_mac_addr.bytes[0] = 0x33;
+	peer_mac_addr.bytes[1] = 0x33;
+	peer_mac_addr.bytes[2] = 0xff;
+	priv_obj->peer_mc_addr_list[list_idx] = peer_mac_addr;
+
+	qdf_spin_unlock_bh(&priv_obj->lock);
+
+	ucfg_nan_update_mc_list(vdev);
+}
+
+inline void ucfg_nan_get_peer_mc_list(
+				struct wlan_objmgr_vdev *vdev,
+				struct qdf_mac_addr **peer_mc_addr_list)
+{
+	struct nan_vdev_priv_obj *priv_obj = nan_get_vdev_priv_obj(vdev);
+
+	if (!priv_obj) {
+		nan_err("priv_obj is null");
+		return;
+	}
+
+	*peer_mc_addr_list = priv_obj->peer_mc_addr_list;
+}
+
+inline void ucfg_nan_clear_peer_mc_list(struct wlan_objmgr_psoc *psoc,
+					struct wlan_objmgr_vdev *vdev,
+					struct qdf_mac_addr *peer_mac_addr)
+{
+	struct nan_vdev_priv_obj *priv_obj = nan_get_vdev_priv_obj(vdev);
+	int i;
+	uint32_t max_ndp_sessions = 0;
+	struct qdf_mac_addr derived_peer_mc_addr;
+
+	if (!priv_obj) {
+		nan_err("priv_obj is null");
+		return;
+	}
+
+	/* Derive peer multicast addr */
+	derived_peer_mc_addr = *peer_mac_addr;
+	derived_peer_mc_addr.bytes[0] = 0x33;
+	derived_peer_mc_addr.bytes[1] = 0x33;
+	derived_peer_mc_addr.bytes[2] = 0xff;
+	qdf_spin_lock_bh(&priv_obj->lock);
+	cfg_nan_get_ndp_max_sessions(psoc, &max_ndp_sessions);
+	for (i = 0; i < max_ndp_sessions; i++) {
+		if (qdf_is_macaddr_equal(&priv_obj->peer_mc_addr_list[i],
+					 &derived_peer_mc_addr)) {
+			qdf_zero_macaddr(&priv_obj->peer_mc_addr_list[i]);
+			break;
+		}
+	}
+
+	qdf_spin_unlock_bh(&priv_obj->lock);
+
+	ucfg_nan_update_mc_list(vdev);
 }
 
 inline uint32_t ucfg_nan_get_active_peers(struct wlan_objmgr_vdev *vdev)
@@ -534,6 +658,7 @@ int ucfg_nan_register_hdd_callbacks(struct wlan_objmgr_psoc *psoc,
 				ucfg_nan_request_process_cb;
 	psoc_obj->cb_obj.nan_concurrency_update =
 				cb_obj->nan_concurrency_update;
+	psoc_obj->cb_obj.set_mc_list = cb_obj->set_mc_list;
 
 	return 0;
 }
@@ -788,8 +913,16 @@ post_msg:
 			if (req_type == NAN_ENABLE_REQ) {
 				nan_set_discovery_state(psoc,
 							NAN_DISC_DISABLED);
-				policy_mgr_check_n_start_opportunistic_timer(
-									psoc);
+				if (ucfg_is_nan_dbs_supported(psoc))
+					policy_mgr_check_n_start_opportunistic_timer(psoc);
+
+				/*
+				 * If FW respond with NAN enable failure, then
+				 * TDLS should be enable again if there is TDLS
+				 * connection exist earlier.
+				 * decrement the active TDLS session.
+				 */
+				ucfg_tdls_notify_connect_failure(psoc);
 			} else if (req_type == NAN_DISABLE_REQ) {
 				nan_disable_cleanup(psoc);
 			}

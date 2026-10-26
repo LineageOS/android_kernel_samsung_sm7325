@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2023, 2025 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -285,15 +286,16 @@ wlan_hdd_validate_and_override_offchan(struct hdd_adapter *adapter,
 				       struct ieee80211_channel *chan,
 				       bool *offchan)
 {
-	uint8_t home_ch;
+	qdf_freq_t home_ch_freq;
 
 	if (!offchan || !chan || !(*offchan))
 		return;
 
-	home_ch = hdd_get_adapter_home_channel(adapter);
+	home_ch_freq = hdd_get_adapter_home_channel(adapter);
 
-	if (ieee80211_frequency_to_channel(chan->center_freq) == home_ch) {
-		hdd_debug("override offchan to 0 at home channel %d", home_ch);
+	if (chan->center_freq == home_ch_freq) {
+		hdd_debug("override offchan to 0 at home channel %d",
+			  home_ch_freq);
 		*offchan = false;
 	}
 }
@@ -527,7 +529,7 @@ int hdd_set_p2p_noa(struct net_device *dev, uint8_t *command)
 		noa.single_noa_duration = duration;
 		noa.ps_selection = P2P_POWER_SAVE_TYPE_SINGLE_NOA;
 	} else {
-		if (duration >= interval) {
+		if (count && (duration >= interval)) {
 			hdd_err("Duration should be less than interval");
 			return -EINVAL;
 		}
@@ -808,7 +810,10 @@ struct wireless_dev *__wlan_hdd_add_virtual_intf(struct wiphy *wiphy,
 					   name_assign_type, true);
 	} else {
 		uint8_t *device_address;
-
+		if (strnstr(name, "p2p", 3) && mode == QDF_STA_MODE) {
+			hdd_debug("change mode to p2p device");
+			mode = QDF_P2P_DEVICE_MODE;
+		}
 		device_address = wlan_hdd_get_intf_addr(hdd_ctx, mode);
 		if (!device_address)
 			return ERR_PTR(-EINVAL);
@@ -962,8 +967,8 @@ int __wlan_hdd_del_virtual_intf(struct wiphy *wiphy, struct wireless_dev *wdev)
 
 	if (adapter->device_mode == QDF_SAP_MODE &&
 	    wlan_sap_is_pre_cac_active(hdd_ctx->mac_handle)) {
-		hdd_clean_up_interface(hdd_ctx, adapter);
 		hdd_clean_up_pre_cac_interface(hdd_ctx);
+		hdd_clean_up_interface(hdd_ctx, adapter);
 	} else if (wlan_hdd_is_session_type_monitor(
 					adapter->device_mode) &&
 		   ucfg_pkt_capture_get_mode(hdd_ctx->psoc) !=

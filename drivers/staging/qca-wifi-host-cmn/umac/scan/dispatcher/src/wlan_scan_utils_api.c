@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -337,6 +338,18 @@ util_scan_get_phymode_6g(struct wlan_objmgr_pdev *pdev,
 					band_mask);
 
 	return phymode;
+}
+
+uint8_t
+util_scan_get_6g_oper_channel(uint8_t *he_op_ie)
+{
+	struct he_oper_6g_param *he_6g_params;
+
+	he_6g_params = util_scan_get_he_6g_params(he_op_ie);
+	if (!he_6g_params)
+		return 0;
+
+	return he_6g_params->primary_channel;
 }
 #else
 static QDF_STATUS
@@ -731,7 +744,8 @@ util_scan_parse_rnr_ie(struct scan_cache_entry *scan_entry,
 	rnr_ie_len = ie->ie_len;
 	data = (uint8_t *)ie + sizeof(struct ie_header);
 
-	while (data < ((uint8_t *)ie + rnr_ie_len + 2)) {
+	while ((data + sizeof(struct neighbor_ap_info_field)) <=
+					((uint8_t *)ie + rnr_ie_len + 2)) {
 		neighbor_ap_info = (struct neighbor_ap_info_field *)data;
 		tbtt_count = neighbor_ap_info->tbtt_header.tbtt_info_count;
 		tbtt_length = neighbor_ap_info->tbtt_header.tbtt_info_length;
@@ -747,7 +761,8 @@ util_scan_parse_rnr_ie(struct scan_cache_entry *scan_entry,
 			break;
 
 		for (i = 0; i < (tbtt_count + 1) &&
-		     data < ((uint8_t *)ie + rnr_ie_len + 2); i++) {
+		     (data + tbtt_length) <=
+				((uint8_t *)ie + rnr_ie_len + 2); i++) {
 			if (i < MAX_RNR_BSS)
 				util_scan_update_rnr(
 					&scan_entry->rnr.bss_info[i],
@@ -776,6 +791,9 @@ util_scan_parse_extn_ie(struct scan_cache_entry *scan_params,
 		scan_params->ie_list.srp   = (uint8_t *)ie;
 		break;
 	case WLAN_EXTN_ELEMID_HECAP:
+		if ((extn_ie->ie_len < WLAN_MIN_HECAP_IE_LEN) ||
+		    (extn_ie->ie_len > WLAN_MAX_HECAP_IE_LEN))
+			return QDF_STATUS_E_INVAL;
 		scan_params->ie_list.hecap = (uint8_t *)ie;
 		break;
 	case WLAN_EXTN_ELEMID_HEOP:
@@ -1205,7 +1223,8 @@ static void util_scan_update_esp_data(struct wlan_esp_ie *esp_information,
 	esp_ie = (struct wlan_esp_ie *)
 		util_scan_entry_esp_info(scan_entry);
 
-	total_elements  = esp_ie->esp_len;
+	// Ignore ESP_ID_EXTN element
+	total_elements  = esp_ie->esp_len - 1;
 	data = (uint8_t *)esp_ie + 3;
 	do_div(total_elements, ESP_INFORMATION_LIST_LENGTH);
 
@@ -1215,7 +1234,7 @@ static void util_scan_update_esp_data(struct wlan_esp_ie *esp_information,
 	}
 
 	for (i = 0; i < total_elements &&
-	     data < ((uint8_t *)esp_ie + esp_ie->esp_len + 3); i++) {
+	     data < ((uint8_t *)esp_ie + esp_ie->esp_len); i++) {
 		esp_info = (struct wlan_esp_info *)data;
 		if (esp_info->access_category == ESP_AC_BK) {
 			qdf_mem_copy(&esp_information->esp_info_AC_BK,
@@ -1245,7 +1264,7 @@ static void util_scan_update_esp_data(struct wlan_esp_ie *esp_information,
 }
 
 /**
- * util_scan_scm_update_bss_with_esp_dataa: calculate estimated air time
+ * util_scan_scm_update_bss_with_esp_data: calculate estimated air time
  * fraction
  * @scan_entry: new received entry
  *
@@ -1295,7 +1314,7 @@ static void util_scan_scm_update_bss_with_esp_data(
 
 /**
  * util_scan_scm_calc_nss_supported_by_ap() - finds out nss from AP
- * @scan_entry: new received entry
+ * @scan_params: new received entry
  *
  * Return: number of nss advertised by AP
  */
@@ -1304,28 +1323,36 @@ static int util_scan_scm_calc_nss_supported_by_ap(
 {
 	struct htcap_cmn_ie *htcap;
 	struct wlan_ie_vhtcaps *vhtcaps;
-	struct wlan_ie_hecaps *hecaps;
+	uint8_t *he_cap;
+	uint8_t *end_ptr = NULL;
 	uint16_t rx_mcs_map = 0;
+	uint8_t *mcs_map_offset;
 
 	htcap = (struct htcap_cmn_ie *)
 		util_scan_entry_htcap(scan_params);
 	vhtcaps = (struct wlan_ie_vhtcaps *)
 		util_scan_entry_vhtcap(scan_params);
-	hecaps = (struct wlan_ie_hecaps *)
-		util_scan_entry_hecap(scan_params);
+	he_cap = util_scan_entry_hecap(scan_params);
 
-	if (hecaps) {
+	if (he_cap) {
 		/* Using rx mcs map related to 80MHz or lower as in some
-		 * cases higher mcs may suuport lesser NSS than that
+		 * cases higher mcs may support lesser NSS than that
 		 * of lowe mcs. Thus giving max NSS capability.
 		 */
-		rx_mcs_map =
-			qdf_cpu_to_le16(hecaps->mcs_bw_map[0].rx_mcs_map);
+		end_ptr = he_cap + he_cap[1] + sizeof(struct ie_header);
+		mcs_map_offset = (he_cap + sizeof(struct extn_ie_header) +
+				  WLAN_HE_MACCAP_LEN + WLAN_HE_PHYCAP_LEN);
+		if ((mcs_map_offset + WLAN_HE_MCS_MAP_LEN) <= end_ptr) {
+			rx_mcs_map = *(uint16_t *)mcs_map_offset;
+		} else {
+			rx_mcs_map = WLAN_INVALID_RX_MCS_MAP;
+			scm_debug("mcs_map_offset exceeds he cap len");
+		}
 	} else if (vhtcaps) {
 		rx_mcs_map = vhtcaps->rx_mcs_map;
 	}
 
-	if (hecaps || vhtcaps) {
+	if (he_cap || vhtcaps) {
 		if ((rx_mcs_map & 0xC000) != 0xC000)
 			return 8;
 
@@ -1629,7 +1656,7 @@ util_scan_gen_scan_entry(struct wlan_objmgr_pdev *pdev,
 	scan_entry->bcn_int = le16toh(bcn->beacon_interval);
 
 	/*
-	 * In case if the beacon dosnt have
+	 * In case if the beacon doesn't have
 	 * valid beacon interval falback to def
 	 */
 	if (!scan_entry->bcn_int)
@@ -1800,7 +1827,8 @@ static uint8_t
 	if (!ies)
 		return NULL;
 
-	while (len >= MIN_IE_LEN && len >= ies[TAG_LEN_POS] + MIN_IE_LEN) {
+	while ((len >= MIN_IE_LEN + 1) && len >= ies[TAG_LEN_POS] + MIN_IE_LEN)
+	{
 		if ((ies[ID_POS] == elem_id) &&
 		    (ies[ELEM_ID_EXTN_POS] ==
 		     WLAN_EXTN_ELEMID_NONINHERITANCE)) {
@@ -1944,6 +1972,16 @@ static void util_parse_noninheritance_list(uint8_t *extn_elem,
 	}
 }
 
+static size_t util_oui_header_len(uint8_t *ie)
+{
+	/* Cisco Vendor Specific IEs doesn't have subtype in
+	 * their VSIE header, therefore skip subtype
+	 */
+	if (ie[0] == 0x00 && ie[1] == 0x40 && ie[2] == 0x96)
+		return OUI_LEN - 1;
+	return OUI_LEN;
+}
+
 static uint32_t util_gen_new_ie(uint8_t *ie, uint32_t ielen,
 				uint8_t *subelement,
 				size_t subie_len, uint8_t *new_ie)
@@ -1981,9 +2019,11 @@ static uint32_t util_gen_new_ie(uint8_t *ie, uint32_t ielen,
 	extn_elem = util_scan_find_noninheritance_ie(WLAN_ELEMID_EXTN_ELEM,
 						     sub_copy, subie_len);
 
-	if (extn_elem && extn_elem[TAG_LEN_POS]) {
-		util_parse_noninheritance_list(extn_elem, &elem_list,
-					       &extn_elem_list, &ninh);
+	if (extn_elem && extn_elem[TAG_LEN_POS] >= VALID_ELEM_LEAST_LEN) {
+		if (((extn_elem + extn_elem[1] + MIN_IE_LEN) - sub_copy)
+		    <= subie_len)
+			util_parse_noninheritance_list(extn_elem, &elem_list,
+						       &extn_elem_list, &ninh);
 	}
 
 	/* go through IEs in ie (skip SSID) and subelement,
@@ -1991,6 +2031,11 @@ static uint32_t util_gen_new_ie(uint8_t *ie, uint32_t ielen,
 	 */
 	tmp_old = util_scan_find_ie(WLAN_ELEMID_SSID, ie, ielen);
 	tmp_old = (tmp_old) ? tmp_old + tmp_old[1] + MIN_IE_LEN : ie;
+
+	if (((tmp_old + MIN_IE_LEN) - ie) >= ielen) {
+		qdf_mem_free(sub_copy);
+		return 0;
+	}
 
 	while (((tmp_old + tmp_old[1] + MIN_IE_LEN) - ie) <= ielen) {
 		ninh.non_inh_ie_found = 0;
@@ -2013,6 +2058,9 @@ static uint32_t util_gen_new_ie(uint8_t *ie, uint32_t ielen,
 		}
 
 		if (ninh.non_inh_ie_found || (tmp_old[0] == 0)) {
+			if (((tmp_old + tmp_old[1] + MIN_IE_LEN) - ie) >=
+			    (ielen - MIN_IE_LEN))
+				break;
 			tmp_old += tmp_old[1] + MIN_IE_LEN;
 			continue;
 		}
@@ -2033,16 +2081,18 @@ static uint32_t util_gen_new_ie(uint8_t *ie, uint32_t ielen,
 		} else {
 			/* ie in transmitting ie also in subelement,
 			 * copy from subelement and flag the ie in subelement
-			 * as copied (by setting eid field to 0xff). For
-			 * vendor ie, compare OUI + type + subType to
-			 * determine if they are the same ie.
+			 * as copied (by setting eid field to 0xff).
+			 * To determine if the vendor ies are same:
+			 * 1. For Cisco OUI, compare only OUI + type
+			 * 2. For other OUI, compare OUI + type + subType
 			 */
 			tmp_rem_len = subie_len - (tmp - sub_copy);
 			if (tmp_old[0] == WLAN_ELEMID_VENDOR &&
 			    tmp_rem_len >= MIN_VENDOR_TAG_LEN) {
 				if (!qdf_mem_cmp(tmp_old + PAYLOAD_START_POS,
 						 tmp + PAYLOAD_START_POS,
-						 OUI_LEN)) {
+						 util_oui_header_len(tmp +
+								     PAYLOAD_START_POS))) {
 					/* same vendor ie, copy from
 					 * subelement
 					 */
@@ -2065,7 +2115,8 @@ static uint32_t util_gen_new_ie(uint8_t *ie, uint32_t ielen,
 							MIN_IE_LEN;
 					}
 				}
-			} else if (tmp_old[0] == WLAN_ELEMID_EXTN_ELEM) {
+			} else if (tmp_old[0] == WLAN_ELEMID_EXTN_ELEM &&
+				   tmp_rem_len >= (MIN_IE_LEN + 1)) {
 				if (tmp_old[PAYLOAD_START_POS] ==
 				    tmp[PAYLOAD_START_POS]) {
 					/* same ie, copy from subelement */
@@ -2099,7 +2150,8 @@ static uint32_t util_gen_new_ie(uint8_t *ie, uint32_t ielen,
 			}
 		}
 
-		if (((tmp_old + tmp_old[1] + MIN_IE_LEN) - ie) >= ielen)
+		if (((tmp_old + tmp_old[1] + MIN_IE_LEN) - ie) >=
+		    (ielen - MIN_IE_LEN))
 			break;
 
 		tmp_old += tmp_old[1] + MIN_IE_LEN;
@@ -2109,12 +2161,13 @@ static uint32_t util_gen_new_ie(uint8_t *ie, uint32_t ielen,
 	 * copied to new ie, skip ssid, capability, bssid-index ie
 	 */
 	tmp_new = sub_copy;
-	while (((tmp_new + tmp_new[1] + MIN_IE_LEN) - sub_copy) <=
-	       subie_len) {
+	while ((subie_len > 0) &&
+	       (((tmp_new + tmp_new[1] + MIN_IE_LEN) - sub_copy) <=
+		subie_len)) {
 		if (!(tmp_new[0] == WLAN_ELEMID_NONTX_BSSID_CAP ||
 		      tmp_new[0] == WLAN_ELEMID_SSID ||
 		      tmp_new[0] == WLAN_ELEMID_MULTI_BSSID_IDX ||
-		      ((tmp_new[0] == WLAN_ELEMID_EXTN_ELEM) &&
+		      ((tmp_new[0] == WLAN_ELEMID_EXTN_ELEM) && tmp_new[1] &&
 		       (tmp_new[2] == WLAN_EXTN_ELEMID_NONINHERITANCE)))) {
 			if ((pos + tmp_new[1] + MIN_IE_LEN) <=
 			    (new_ie + ielen)) {
@@ -2124,7 +2177,7 @@ static uint32_t util_gen_new_ie(uint8_t *ie, uint32_t ielen,
 			}
 		}
 		if (((tmp_new + tmp_new[1] + MIN_IE_LEN) - sub_copy) >=
-		    subie_len)
+		    (subie_len - 1))
 			break;
 		tmp_new += tmp_new[1] + MIN_IE_LEN;
 	}
@@ -2234,6 +2287,9 @@ static bool util_scan_is_split_prof_found(uint8_t *next_elem,
 {
 	uint8_t *next_mbssid_elem;
 
+	if ((next_elem + MIN_IE_LEN + VALID_ELEM_LEAST_LEN) > (ie + ielen))
+		return false;
+
 	if (next_elem[0] == WLAN_ELEMID_MULTIPLE_BSSID) {
 		if ((next_elem[TAG_LEN_POS] >= VALID_ELEM_LEAST_LEN) &&
 		    (next_elem[SUBELEM_DATA_POS_FROM_MBSSID] !=
@@ -2303,6 +2359,15 @@ static QDF_STATUS util_scan_parse_mbssid(struct wlan_objmgr_pdev *pdev,
 		if (!mbssid_elem)
 			break;
 
+		/*
+		 * The max_bssid_indicator field is mandatory, therefore the
+		 * length of the MBSSID element should atleast be 1.
+		 */
+		if (!mbssid_elem[TAG_LEN_POS]) {
+			scm_debug_rl("MBSSID IE is of length zero");
+			break;
+		}
+
 		mbssid_info.profile_count =
 			(1 << mbssid_elem[MBSSID_INDICATOR_POS]);
 
@@ -2349,8 +2414,10 @@ static QDF_STATUS util_scan_parse_mbssid(struct wlan_objmgr_pdev *pdev,
 					   subie_len,
 					   mbssid_info.split_prof_continue,
 					   mbssid_info.prof_residue);
-				if (mbssid_info.split_prof_continue)
+				if (mbssid_info.split_prof_continue) {
 					qdf_mem_free(split_prof_start);
+					split_prof_start = NULL;
+				}
 
 				qdf_mem_free(new_ie);
 				return QDF_STATUS_E_INVAL;
@@ -2372,6 +2439,7 @@ static QDF_STATUS util_scan_parse_mbssid(struct wlan_objmgr_pdev *pdev,
 					   subelement[ID_POS],
 					   subelement[TAG_LEN_POS]);
 				qdf_mem_free(split_prof_start);
+				split_prof_start = NULL;
 				qdf_mem_free(new_ie);
 				return QDF_STATUS_E_INVAL;
 			} else if (retval == INVALID_NONTX_PROF) {
@@ -2471,6 +2539,8 @@ static QDF_STATUS util_scan_parse_mbssid(struct wlan_objmgr_pdev *pdev,
 			}
 
 			if (mbssid_info.split_prof_continue) {
+				if (!split_prof_start)
+					break;
 				nontx_profile = split_prof_start;
 				subie_len = split_prof_len;
 			} else {
@@ -2483,14 +2553,23 @@ static QDF_STATUS util_scan_parse_mbssid(struct wlan_objmgr_pdev *pdev,
 						 PAYLOAD_START_POS),
 						subie_len, new_ie);
 
-			if (!new_ie_len)
+			if (!new_ie_len) {
+				if (mbssid_info.split_prof_continue) {
+					qdf_mem_free(split_prof_start);
+					split_prof_start = NULL;
+					split_prof_end = NULL;
+					split_prof_len = 0;
+				}
 				continue;
+			}
 
 			new_frame_len = frame_len - ielen + new_ie_len;
 
 			if (new_frame_len < 0) {
-				if (mbssid_info.split_prof_continue)
+				if (mbssid_info.split_prof_continue) {
 					qdf_mem_free(split_prof_start);
+					split_prof_start = NULL;
+				}
 				qdf_mem_free(new_ie);
 				scm_err("Invalid frame:Stop MBSSIE parsing");
 				scm_err("Frame_len: %zu,ielen:%u,new_ie_len:%u",
@@ -2500,8 +2579,10 @@ static QDF_STATUS util_scan_parse_mbssid(struct wlan_objmgr_pdev *pdev,
 
 			new_frame = qdf_mem_malloc(new_frame_len);
 			if (!new_frame) {
-				if (mbssid_info.split_prof_continue)
+				if (mbssid_info.split_prof_continue) {
 					qdf_mem_free(split_prof_start);
+					split_prof_start = NULL;
+				}
 				qdf_mem_free(new_ie);
 				scm_err_rl("Malloc for new_frame failed");
 				scm_err_rl("split_prof_continue: %d",
@@ -2541,6 +2622,9 @@ static QDF_STATUS util_scan_parse_mbssid(struct wlan_objmgr_pdev *pdev,
 			if (QDF_IS_STATUS_ERROR(status)) {
 				if (mbssid_info.split_prof_continue) {
 					qdf_mem_free(split_prof_start);
+					split_prof_start = NULL;
+					split_prof_end = NULL;
+					split_prof_len = 0;
 					qdf_mem_zero(&mbssid_info,
 						     sizeof(mbssid_info));
 				}
@@ -2551,14 +2635,21 @@ static QDF_STATUS util_scan_parse_mbssid(struct wlan_objmgr_pdev *pdev,
 				break;
 			}
 			/* scan entry makes its own copy so free the frame*/
-			if (mbssid_info.split_prof_continue)
+			if (mbssid_info.split_prof_continue) {
 				qdf_mem_free(split_prof_start);
+				split_prof_start = NULL;
+				split_prof_end = NULL;
+				split_prof_len = 0;
+			}
 			qdf_mem_free(new_frame);
 		}
 
 		pos = next_elem;
 	}
 	qdf_mem_free(new_ie);
+
+	if (split_prof_start)
+		qdf_mem_free(split_prof_start);
 
 	return QDF_STATUS_SUCCESS;
 }
@@ -2584,9 +2675,9 @@ util_scan_parse_beacon_frame(struct wlan_objmgr_pdev *pdev,
 {
 	struct wlan_bcn_frame *bcn;
 	struct wlan_frame_hdr *hdr;
-	uint8_t *mbssid_ie = NULL;
+	uint8_t *mbssid_ie = NULL, *extcap_ie;
 	uint32_t ie_len = 0;
-	QDF_STATUS status;
+	QDF_STATUS status = QDF_STATUS_E_FAILURE;
 	struct scan_mbssid_info mbssid_info = { 0 };
 
 	hdr = (struct wlan_frame_hdr *)frame;
@@ -2596,12 +2687,25 @@ util_scan_parse_beacon_frame(struct wlan_objmgr_pdev *pdev,
 		sizeof(struct wlan_frame_hdr) -
 		offsetof(struct wlan_bcn_frame, ie));
 
-	mbssid_ie = util_scan_find_ie(WLAN_ELEMID_MULTIPLE_BSSID,
+	extcap_ie = util_scan_find_ie(WLAN_ELEMID_XCAPS,
 				      (uint8_t *)&bcn->ie, ie_len);
-	if (mbssid_ie) {
-		qdf_mem_copy(&mbssid_info.trans_bssid,
-			     hdr->i_addr3, QDF_MAC_ADDR_SIZE);
-		mbssid_info.profile_count = 1 << mbssid_ie[2];
+	/* Process MBSSID when Multiple BSSID (Bit 22) is set in Ext Caps */
+	if (extcap_ie &&
+	    extcap_ie[1] >= 3 && extcap_ie[1] <= WLAN_EXTCAP_IE_MAX_LEN &&
+	    (extcap_ie[4] & 0x40)) {
+		mbssid_ie = util_scan_find_ie(WLAN_ELEMID_MULTIPLE_BSSID,
+					      (uint8_t *)&bcn->ie, ie_len);
+		if (mbssid_ie) {
+			/* some APs announce the MBSSID ie_len as 1 */
+			if (mbssid_ie[TAG_LEN_POS] < 1) {
+				scm_debug("MBSSID IE length is wrong %d",
+					  mbssid_ie[TAG_LEN_POS]);
+				return status;
+			}
+			qdf_mem_copy(&mbssid_info.trans_bssid,
+				     hdr->i_addr3, QDF_MAC_ADDR_SIZE);
+			mbssid_info.profile_count = 1 << mbssid_ie[2];
+		}
 	}
 
 	status = util_scan_gen_scan_entry(pdev, frame, frame_len,

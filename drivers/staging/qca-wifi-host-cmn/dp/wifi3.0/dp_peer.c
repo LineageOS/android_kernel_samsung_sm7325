@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2022 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -2094,6 +2095,26 @@ static inline struct dp_peer *dp_peer_find_add_id(struct dp_soc *soc,
 	return NULL;
 }
 
+#ifdef DP_RX_UDP_OVER_PEER_ROAM
+void dp_rx_reset_roaming_peer(struct dp_soc *soc, uint8_t vdev_id,
+			      uint8_t *peer_mac_addr)
+{
+	struct dp_vdev *vdev = NULL;
+
+	vdev = dp_vdev_get_ref_by_id(soc, vdev_id, DP_MOD_ID_HTT);
+	if (vdev) {
+		if (qdf_mem_cmp(vdev->roaming_peer_mac.raw, peer_mac_addr,
+				QDF_MAC_ADDR_SIZE) == 0) {
+			vdev->roaming_peer_status =
+						WLAN_ROAM_PEER_AUTH_STATUS_NONE;
+			qdf_mem_zero(vdev->roaming_peer_mac.raw,
+				     QDF_MAC_ADDR_SIZE);
+		}
+		dp_vdev_unref_delete(soc, vdev, DP_MOD_ID_HTT);
+	}
+}
+#endif
+
 /**
  * dp_rx_peer_map_handler() - handle peer map event from firmware
  * @soc_handle - genereic soc handle
@@ -2186,6 +2207,8 @@ dp_rx_peer_map_handler(struct dp_soc *soc, uint16_t peer_id,
 		err = dp_peer_map_ast(soc, peer, peer_mac_addr, hw_peer_id,
 				      vdev_id, ast_hash, is_wds);
 	}
+
+	dp_rx_reset_roaming_peer(soc, vdev_id, peer_mac_addr);
 
 	return err;
 }
@@ -3529,9 +3552,7 @@ int dp_addba_requestprocess_wifi3(struct cdp_soc_t *cdp_soc,
 
 		buffersize = rx_tid->rx_ba_win_size_override;
 	} else {
-		QDF_TRACE(QDF_MODULE_ID_DP, QDF_TRACE_LEVEL_INFO,
-			  "%s restore BA win %d based on addba req",
-			    __func__, buffersize);
+		dp_info("restore BA win %d based on addba req", buffersize);
 	}
 
 	dp_check_ba_buffersize(peer, tid, buffersize);

@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -582,8 +583,12 @@ void lim_process_mlm_auth_cnf(struct mac_context *mac_ctx, uint32_t *msg)
 			 * password is used. Then AP will still reject the
 			 * authentication even correct password is used unless
 			 * STA send deauth to AP upon authentication failure.
+			 *
+			 * Do not send deauth mgmt frame when already in Deauth
+			 * state while joining.
 			 */
-			if (auth_type == eSIR_AUTH_TYPE_SAE) {
+			if (auth_type == eSIR_AUTH_TYPE_SAE &&
+			    auth_cnf->resultCode != eSIR_SME_DEAUTH_WHILE_JOIN) {
 				pe_debug("Send deauth for SAE auth failure");
 				lim_send_deauth_mgmt_frame(mac_ctx,
 						       auth_cnf->protStatusCode,
@@ -2320,8 +2325,7 @@ void lim_handle_add_bss_rsp(struct mac_context *mac_ctx,
 			}
 			tx_ops = wlan_reg_get_tx_ops(mac_ctx->psoc);
 
-			lim_calculate_tpc(mac_ctx, session_entry, false, 0,
-					  false);
+			lim_calculate_tpc(mac_ctx, session_entry);
 
 			if (tx_ops->set_tpc_power)
 				tx_ops->set_tpc_power(mac_ctx->psoc,
@@ -2806,7 +2810,7 @@ static void lim_process_switch_channel_join_req(
 			goto error;
 		}
 
-		lim_calculate_tpc(mac_ctx, session_entry, false, 0, false);
+		lim_calculate_tpc(mac_ctx, session_entry);
 
 		if (tx_ops->set_tpc_power)
 			tx_ops->set_tpc_power(mac_ctx->psoc,

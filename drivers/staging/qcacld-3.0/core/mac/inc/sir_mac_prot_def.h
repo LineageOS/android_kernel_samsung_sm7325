@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2011-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022,2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -134,6 +135,7 @@
 /* block acknowledgment action frame types */
 #define SIR_MAC_ACTION_VENDOR_SPECIFIC 9
 #define SIR_MAC_ACTION_VENDOR_SPECIFIC_CATEGORY     0x7F
+#define SIR_MAC_PROT_ACTION_VENDOR_SPECIFIC_CATEGORY 0x7E
 #define SIR_MAC_ACTION_P2P_SUBTYPE_PRESENCE_RSP     2
 
 /* Public Action for 20/40 BSS Coexistence */
@@ -345,9 +347,11 @@
 #define SIR_MAC_BAD_HTC_HE_VENDOR_OUI2             "\x00\x50\xF2\x12"
 #define SIR_MAC_BAD_HTC_HE_VENDOR_OUI_LEN         4
 
-/* Maximum allowable size of a beacon and probe rsp frame */
-#define SIR_MAX_BEACON_SIZE    512
+/* Maximum allowable size of a beacon,probe rsp and fils discovery frame */
+#define SIR_MAX_BEACON_SIZE     512
 #define SIR_MAX_PROBE_RESP_SIZE 512
+#define SIR_MAX_FD_TMPL_SIZE    512
+
 
 /* / Frame control field format (2 bytes) */
 typedef struct sSirMacFrameCtl {
@@ -1868,4 +1872,6 @@ struct he_6ghz_capability_info {
 #define SIR_MAC_TXSTBC                             1
 #define SIR_MAC_RXSTBC                             1
 
+#define SIR_MAC_RSNX_CAP_MIN_LEN                   1
+#define SIR_MAC_RSNX_CAP_MAX_LEN                  16
 #endif /* __MAC_PROT_DEFS_H */

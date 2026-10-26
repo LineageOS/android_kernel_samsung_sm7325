@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2016-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -74,10 +75,6 @@ QDF_STATUS os_if_monitor_mode_configure(struct hdd_adapter *adapter,
 	QDF_STATUS status;
 
 	os_if_pkt_enter();
-
-	if (tb[SET_MONITOR_MODE_INVALID])
-		return QDF_STATUS_E_FAILURE;
-
 	vdev = hdd_objmgr_get_vdev(adapter);
 	if (!vdev)
 		return QDF_STATUS_E_INVAL;
@@ -88,6 +85,9 @@ QDF_STATUS os_if_monitor_mode_configure(struct hdd_adapter *adapter,
 		hdd_objmgr_put_vdev(vdev);
 		return QDF_STATUS_E_INVAL;
 	}
+
+	if (tb[SET_MONITOR_MODE_INVALID])
+		return QDF_STATUS_E_FAILURE;
 
 	if (tb[SET_MONITOR_MODE_DATA_TX_FRAME_TYPE] &&
 	    nla_get_u32(tb[SET_MONITOR_MODE_DATA_TX_FRAME_TYPE]) <
@@ -150,7 +150,7 @@ QDF_STATUS os_if_monitor_mode_configure(struct hdd_adapter *adapter,
 			BIT(SET_MONITOR_MODE_CONNECTED_BEACON_INTERVAL);
 	}
 
-	osif_debug("Monitor mode config %s data tx %d data rx %d mgmt tx %d mgmt rx %d ctrl tx %d ctrl rx %d bi %d\n",
+	osif_debug("Monitor mode config data tx %d data rx %d mgmt tx %d mgmt rx %d ctrl tx %d ctrl rx %d bi %d\n",
 		   frame_filter.data_tx_frame_filter,
 		   frame_filter.data_rx_frame_filter,
 		   frame_filter.mgmt_tx_frame_filter,

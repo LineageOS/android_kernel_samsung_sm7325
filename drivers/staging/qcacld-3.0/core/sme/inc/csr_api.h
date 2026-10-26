@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2011-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -273,7 +274,6 @@ typedef struct sCsrChnPower_ {
 
 typedef struct tagCsr11dinfo {
 	sCsrChannel Channels;
-	uint8_t countryCode[REG_ALPHA2_LEN + 1];
 	/* max power channel list */
 	sCsrChnPower ChnPower[CFG_VALID_CHANNEL_LIST_LEN];
 } tCsr11dinfo;
@@ -662,6 +662,7 @@ struct csr_roam_profile {
 	tCsrKeys Keys;
 	tCsrChannelInfo ChannelInfo;
 	uint32_t op_freq;
+	uint32_t freq_hint;
 	struct ch_params ch_params;
 	/* If this is 0, SME will fill in for caller. */
 	uint16_t beaconInterval;
@@ -717,6 +718,7 @@ struct csr_roam_profile {
 	tSirMacRateSet  extended_rates;
 	struct qdf_mac_addr bssid_hint;
 	bool force_24ghz_in_ht20;
+	bool require_h2e;
 	uint32_t cac_duration_ms;
 	uint32_t dfs_regdomain;
 #ifdef WLAN_FEATURE_FILS_SK
@@ -725,6 +727,7 @@ struct csr_roam_profile {
 	struct wlan_fils_connection_info *fils_con_info;
 #endif
 	bool force_rsne_override;
+	bool is_hs_20_ap;
 };
 
 #ifdef FEATURE_WLAN_MCC_TO_SCC_SWITCH
@@ -1480,6 +1483,15 @@ QDF_STATUS csr_mlme_vdev_disconnect_all_p2p_client_event(uint8_t vdev_id);
  * Return: QDF_STATUS
  */
 QDF_STATUS csr_mlme_vdev_stop_bss(uint8_t vdev_id);
+
+/*
+ * csr_get_basic_rates() - Get basic rate for a band
+ * @b_rates: Basic rate
+ * @chan_freq: frequency for which basic rate is required
+ *
+ * Return: void
+ */
+void csr_get_basic_rates(tSirMacRateSet *b_rates, uint32_t chan_freq);
 
 /*
  * csr_mlme_get_concurrent_operation_freq() - Callback for MLME module to

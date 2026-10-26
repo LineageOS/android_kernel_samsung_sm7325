@@ -1,5 +1,7 @@
 /*
  * Copyright (c) 2020, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  *
  * Permission to use, copy, modify, and/or distribute this software for any
  * purpose with or without fee is hereby granted, provided that the above
@@ -189,21 +191,12 @@ QDF_STATUS wlan_cm_abort_rso(struct wlan_objmgr_pdev *pdev, uint8_t vdev_id)
 bool wlan_cm_roaming_in_progress(struct wlan_objmgr_pdev *pdev, uint8_t vdev_id)
 {
 	struct wlan_objmgr_psoc *psoc = wlan_pdev_get_psoc(pdev);
-	QDF_STATUS status;
-
-	status = cm_roam_acquire_lock();
-	if (QDF_IS_STATUS_ERROR(status))
-		return false;
 
 	if (MLME_IS_ROAM_SYNCH_IN_PROGRESS(psoc, vdev_id) ||
 	    MLME_IS_ROAMING_IN_PROG(psoc, vdev_id) ||
 	    mlme_is_roam_invoke_in_progress(psoc, vdev_id) ||
-	    wlan_cm_neighbor_roam_in_progress(psoc, vdev_id)) {
-		cm_roam_release_lock();
+	    wlan_cm_neighbor_roam_in_progress(psoc, vdev_id))
 		return true;
-	}
-
-	cm_roam_release_lock();
 
 	return false;
 }
@@ -358,6 +351,9 @@ wlan_cm_dual_sta_roam_update_connect_channels(struct wlan_objmgr_psoc *psoc,
 	bool is_ch_allowed;
 	struct wlan_mlme_psoc_ext_obj *mlme_obj;
 	struct wlan_mlme_cfg *mlme_cfg;
+	uint32_t buff_len;
+	char *chan_buff;
+	uint32_t len = 0;
 
 	mlme_obj = mlme_get_psoc_ext_obj(psoc);
 	if (!mlme_obj)
@@ -376,6 +372,16 @@ wlan_cm_dual_sta_roam_update_connect_channels(struct wlan_objmgr_psoc *psoc,
 	num_channels = mlme_cfg->reg.valid_channel_list_num;
 	channel_list = mlme_cfg->reg.valid_channel_freq_list;
 
+	/*
+	 * Buffer of (num channl * 5) + 1  to consider the 4 char freq,
+	 * 1 space after it for each channel and 1 to end the string
+	 * with NULL.
+	 */
+	buff_len = (num_channels * 5) + 1;
+	chan_buff = qdf_mem_malloc(buff_len);
+	if (!chan_buff)
+		return;
+
 	filter->num_of_channels = 0;
 	for (i = 0; i < num_channels; i++) {
 		is_ch_allowed =
@@ -387,7 +393,16 @@ wlan_cm_dual_sta_roam_update_connect_channels(struct wlan_objmgr_psoc *psoc,
 		filter->chan_freq_list[filter->num_of_channels] =
 					channel_list[i];
 		filter->num_of_channels++;
+
+		len += qdf_scnprintf(chan_buff + len, buff_len - len,
+				     "%d ", channel_list[i]);
 	}
+
+	if (filter->num_of_channels)
+		mlme_debug("Freq list (%d): %s", filter->num_of_channels,
+			   chan_buff);
+
+	qdf_mem_free(chan_buff);
 }
 
 void
@@ -502,6 +517,13 @@ QDF_STATUS wlan_cm_roam_cfg_get_value(struct wlan_objmgr_psoc *psoc,
 	case HI_RSSI_DELAY_BTW_SCANS:
 		dst_config->uint_value = src_config->hi_rssi_scan_delay;
 		break;
+	case ROAM_RSSI_DIFF_6GHZ:
+		dst_config->uint_value = src_config->roam_rssi_diff_6ghz;
+		break;
+	case ROAM_RSSI_DELTA_6GHZ_TO_NON_6GHZ:
+		dst_config->uint_value =
+			src_config->roam_rssi_delta_6ghz_to_non_6ghz;
+		break;
 	default:
 		mlme_err("Invalid roam config requested:%d", roam_cfg_type);
 		status = QDF_STATUS_E_FAILURE;
@@ -547,6 +569,13 @@ wlan_cm_roam_cfg_set_value(struct wlan_objmgr_psoc *psoc, uint8_t vdev_id,
 		break;
 	case HI_RSSI_DELAY_BTW_SCANS:
 		dst_config->hi_rssi_scan_delay = src_config->uint_value;
+		break;
+	case ROAM_RSSI_DIFF_6GHZ:
+		dst_config->roam_rssi_diff_6ghz = src_config->uint_value;
+		break;
+	case ROAM_RSSI_DELTA_6GHZ_TO_NON_6GHZ:
+		dst_config->roam_rssi_delta_6ghz_to_non_6ghz  =
+						src_config->uint_value;
 		break;
 	default:
 		mlme_err("Invalid roam config requested:%d", roam_cfg_type);
@@ -874,5 +903,114 @@ uint8_t wlan_cm_get_roam_rt_stats(struct wlan_objmgr_psoc *psoc,
 	}
 
 	return rstats_value;
+}
+
+void
+wlan_cm_roam_set_ho_delay_config(struct wlan_objmgr_psoc *psoc,
+				 uint16_t roam_ho_delay)
+{
+	struct wlan_mlme_psoc_ext_obj *mlme_obj;
+
+	mlme_obj = mlme_get_psoc_ext_obj(psoc);
+	if (!mlme_obj)
+		return;
+
+	mlme_obj->cfg.lfr.roam_ho_delay_config = roam_ho_delay;
+}
+
+uint16_t
+wlan_cm_roam_get_ho_delay_config(struct wlan_objmgr_psoc *psoc)
+{
+	struct wlan_mlme_psoc_ext_obj *mlme_obj;
+
+	mlme_obj = mlme_get_psoc_ext_obj(psoc);
+	if (!mlme_obj) {
+		mlme_legacy_err("Failed to get MLME Obj");
+		return 0;
+	}
+
+	return mlme_obj->cfg.lfr.roam_ho_delay_config;
+}
+#endif
+
+#ifdef WLAN_FEATURE_ROAM_OFFLOAD
+void
+wlan_cm_set_exclude_rm_partial_scan_freq(struct wlan_objmgr_psoc *psoc,
+					 uint8_t exclude_rm_partial_scan_freq)
+{
+	struct wlan_mlme_psoc_ext_obj *mlme_obj;
+
+	mlme_obj = mlme_get_psoc_ext_obj(psoc);
+	if (!mlme_obj)
+		return;
+
+	mlme_obj->cfg.lfr.exclude_rm_partial_scan_freq =
+						exclude_rm_partial_scan_freq;
+}
+
+uint8_t
+wlan_cm_get_exclude_rm_partial_scan_freq(struct wlan_objmgr_psoc *psoc)
+{
+	struct wlan_mlme_psoc_ext_obj *mlme_obj;
+
+	mlme_obj = mlme_get_psoc_ext_obj(psoc);
+	if (!mlme_obj) {
+		mlme_legacy_err("Failed to get MLME Obj");
+		return 0;
+	}
+
+	return mlme_obj->cfg.lfr.exclude_rm_partial_scan_freq;
+}
+
+void
+wlan_cm_roam_set_full_scan_6ghz_on_disc(struct wlan_objmgr_psoc *psoc,
+					uint8_t roam_full_scan_6ghz_on_disc)
+{
+	struct wlan_mlme_psoc_ext_obj *mlme_obj;
+
+	mlme_obj = mlme_get_psoc_ext_obj(psoc);
+	if (!mlme_obj)
+		return;
+
+	mlme_obj->cfg.lfr.roam_full_scan_6ghz_on_disc =
+						roam_full_scan_6ghz_on_disc;
+}
+
+uint8_t wlan_cm_roam_get_full_scan_6ghz_on_disc(struct wlan_objmgr_psoc *psoc)
+{
+	struct wlan_mlme_psoc_ext_obj *mlme_obj;
+
+	mlme_obj = mlme_get_psoc_ext_obj(psoc);
+	if (!mlme_obj) {
+		mlme_legacy_err("Failed to get MLME Obj");
+		return 0;
+	}
+
+	return mlme_obj->cfg.lfr.roam_full_scan_6ghz_on_disc;
+}
+
+void
+wlan_cm_set_roam_scan_high_rssi_offset(struct wlan_objmgr_psoc *psoc,
+				       uint8_t roam_high_rssi_delta)
+{
+	struct wlan_mlme_psoc_ext_obj *mlme_obj;
+
+	mlme_obj = mlme_get_psoc_ext_obj(psoc);
+	if (!mlme_obj)
+		return;
+
+	mlme_obj->cfg.lfr.roam_high_rssi_delta = roam_high_rssi_delta;
+}
+
+uint8_t
+wlan_cm_get_roam_scan_high_rssi_offset(struct wlan_objmgr_psoc *psoc)
+{
+	struct wlan_mlme_psoc_ext_obj *mlme_obj;
+
+	mlme_obj = mlme_get_psoc_ext_obj(psoc);
+	if (!mlme_obj)
+		return 0;
+
+	return mlme_obj->cfg.lfr.roam_high_rssi_delta;
 }
 #endif

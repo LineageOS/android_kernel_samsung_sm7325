@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022, 2025 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -34,6 +35,7 @@
 #include "wlan_p2p_off_chan_tx.h"
 #include "wlan_osif_request_manager.h"
 #include <wlan_mlme_main.h>
+#include "wlan_mlme_api.h"
 
 /**
  * p2p_psoc_get_tx_ops() - get p2p tx ops
@@ -209,7 +211,7 @@ static QDF_STATUS p2p_check_and_update_channel(struct tx_action_context *tx_ctx)
 	struct p2p_soc_priv_obj *p2p_soc_obj;
 	struct p2p_roc_context *curr_roc_ctx;
 
-	if (!tx_ctx || tx_ctx->chan) {
+	if (!tx_ctx || tx_ctx->chan_freq) {
 		p2p_err("NULL tx ctx or channel valid");
 		return QDF_STATUS_E_INVAL;
 	}
@@ -230,7 +232,7 @@ static QDF_STATUS p2p_check_and_update_channel(struct tx_action_context *tx_ctx)
 	    (mode == QDF_P2P_DEVICE_MODE ||
 	     mode == QDF_P2P_CLIENT_MODE ||
 	     mode == QDF_P2P_GO_MODE))
-		tx_ctx->chan = curr_roc_ctx->chan;
+		tx_ctx->chan_freq = curr_roc_ctx->chan_freq;
 
 	wlan_objmgr_vdev_release_ref(vdev, WLAN_P2P_ID);
 
@@ -978,6 +980,71 @@ static QDF_STATUS p2p_send_tx_conf(struct tx_action_context *tx_ctx,
 }
 
 /**
+ * p2p_get_hw_retry_count() - Get hw tx retry count from config store
+ * @psoc:          psoc object
+ * @tx_ctx:        tx context
+ *
+ * This function return the hw tx retry count for p2p action frame.
+ * 0 value means target will use fw default mgmt tx retry count 15.
+ *
+ * Return: frame hw tx retry count
+ */
+static uint8_t p2p_get_hw_retry_count(struct wlan_objmgr_psoc *psoc,
+				      struct tx_action_context *tx_ctx)
+{
+	if (tx_ctx->frame_info.type != P2P_FRAME_MGMT)
+		return 0;
+
+	if (tx_ctx->frame_info.sub_type != P2P_MGMT_ACTION)
+		return 0;
+
+	switch (tx_ctx->frame_info.public_action_type) {
+	case P2P_PUBLIC_ACTION_NEG_REQ:
+		return wlan_mlme_get_mgmt_hw_tx_retry_count(
+					psoc,
+					CFG_GO_NEGOTIATION_REQ_FRAME_TYPE);
+	case P2P_PUBLIC_ACTION_INVIT_REQ:
+		return wlan_mlme_get_mgmt_hw_tx_retry_count(
+					psoc,
+					CFG_P2P_INVITATION_REQ_FRAME_TYPE);
+	case P2P_PUBLIC_ACTION_PROV_DIS_REQ:
+		return wlan_mlme_get_mgmt_hw_tx_retry_count(
+					psoc,
+					CFG_PROVISION_DISCOVERY_REQ_FRAME_TYPE);
+	default:
+		return 0;
+	}
+}
+
+#define GET_HW_RETRY_LIMIT(count) QDF_GET_BITS(count, 0, 4)
+#define GET_HW_RETRY_LIMIT_EXT(count) QDF_GET_BITS(count, 4, 3)
+
+/**
+ * p2p_mgmt_set_hw_retry_count() - Set mgmt hw tx retry count
+ * @psoc:          psoc object
+ * @tx_ctx:        tx context
+ * @mgmt_param:    mgmt frame tx parameter
+ *
+ * This function will set mgmt frame hw tx retry count to tx parameter
+ *
+ * Return: void
+ */
+static void
+p2p_mgmt_set_hw_retry_count(struct wlan_objmgr_psoc *psoc,
+			    struct tx_action_context *tx_ctx,
+			    struct wmi_mgmt_params *mgmt_param)
+{
+	uint8_t retry_count = p2p_get_hw_retry_count(psoc, tx_ctx);
+
+	mgmt_param->tx_param.retry_limit = GET_HW_RETRY_LIMIT(retry_count);
+	mgmt_param->tx_param.retry_limit_ext =
+					GET_HW_RETRY_LIMIT_EXT(retry_count);
+	if (mgmt_param->tx_param.retry_limit ||
+	    mgmt_param->tx_param.retry_limit_ext)
+		mgmt_param->tx_params_valid = true;
+}
+
+/**
  * p2p_mgmt_tx() - call mgmt tx api
  * @tx_ctx:        tx context
  * @buf_len:       buffer length
@@ -1001,22 +1068,20 @@ static QDF_STATUS p2p_mgmt_tx(struct tx_action_context *tx_ctx,
 	void *mac_addr;
 	uint8_t pdev_id;
 	struct wlan_objmgr_vdev *vdev;
-	uint16_t chanfreq = 0;
 
 	psoc = tx_ctx->p2p_soc_obj->soc;
 	mgmt_param.tx_frame = packet;
 	mgmt_param.frm_len = buf_len;
 	mgmt_param.vdev_id = tx_ctx->vdev_id;
 	mgmt_param.pdata = frame;
-	if (tx_ctx->chan)
-		chanfreq = (uint16_t)wlan_chan_to_freq(tx_ctx->chan);
-	mgmt_param.chanfreq = chanfreq;
+	mgmt_param.chanfreq = tx_ctx->chan_freq;
 
 	mgmt_param.qdf_ctx = wlan_psoc_get_qdf_dev(psoc);
 	if (!(mgmt_param.qdf_ctx)) {
 		p2p_err("qdf ctx is null");
 		return QDF_STATUS_E_INVAL;
 	}
+	p2p_mgmt_set_hw_retry_count(psoc, tx_ctx, &mgmt_param);
 
 	wh = (struct wlan_frame_hdr *)frame;
 	mac_addr = wh->i_addr1;
@@ -1052,8 +1117,12 @@ static QDF_STATUS p2p_mgmt_tx(struct tx_action_context *tx_ctx,
 		tx_ota_comp_cb = tgt_p2p_mgmt_ota_comp_cb;
 	}
 
-	p2p_debug("length:%d, chanfreq:%d", mgmt_param.frm_len,
-		  mgmt_param.chanfreq);
+	p2p_debug("length:%d, chanfreq:%d retry count:%d(%d, %d)",
+		  mgmt_param.frm_len, mgmt_param.chanfreq,
+		  (mgmt_param.tx_param.retry_limit_ext << 4) |
+		  mgmt_param.tx_param.retry_limit,
+		  mgmt_param.tx_param.retry_limit,
+		  mgmt_param.tx_param.retry_limit_ext);
 
 	tx_ctx->nbuf = packet;
 
@@ -1089,7 +1158,7 @@ static QDF_STATUS p2p_roc_req_for_tx_action(
 	p2p_soc_obj = tx_ctx->p2p_soc_obj;
 	roc_ctx->p2p_soc_obj = p2p_soc_obj;
 	roc_ctx->vdev_id = tx_ctx->vdev_id;
-	roc_ctx->chan = tx_ctx->chan;
+	roc_ctx->chan_freq = tx_ctx->chan_freq;
 	roc_ctx->duration = tx_ctx->duration;
 	roc_ctx->roc_state = ROC_STATE_IDLE;
 	roc_ctx->roc_type = OFF_CHANNEL_TX;
@@ -1475,38 +1544,6 @@ static QDF_STATUS p2p_disable_tx_timer(struct tx_action_context *tx_ctx)
 }
 
 /**
- * is_rmf_mgmt_action_frame() - check RMF action frame by category
- * @action_category: action frame actegory
- *
- * This function check the frame is robust mgmt action frame or not
- *
- * Return: true - if category is robust mgmt type
- */
-static bool is_rmf_mgmt_action_frame(uint8_t action_category)
-{
-	switch (action_category) {
-	case ACTION_CATEGORY_SPECTRUM_MGMT:
-	case ACTION_CATEGORY_QOS:
-	case ACTION_CATEGORY_DLS:
-	case ACTION_CATEGORY_BACK:
-	case ACTION_CATEGORY_RRM:
-	case ACTION_FAST_BSS_TRNST:
-	case ACTION_CATEGORY_SA_QUERY:
-	case ACTION_CATEGORY_PROTECTED_DUAL_OF_PUBLIC_ACTION:
-	case ACTION_CATEGORY_WNM:
-	case ACTION_CATEGORY_MESH_ACTION:
-	case ACTION_CATEGORY_MULTIHOP_ACTION:
-	case ACTION_CATEGORY_DMG:
-	case ACTION_CATEGORY_FST:
-	case ACTION_CATEGORY_VENDOR_SPECIFIC_PROTECTED:
-		return true;
-	default:
-		break;
-	}
-	return false;
-}
-
-/**
  * p2p_populate_rmf_field() - populate unicast rmf frame
  * @tx_ctx: tx_action_context
  * @size: input size of frame, and output new size
@@ -1549,7 +1586,7 @@ static QDF_STATUS p2p_populate_rmf_field(struct tx_action_context *tx_ctx,
 	 * to get the actual action category we need to ignore the MSB.
 	 */
 	action_category = action_hdr->action_category & 0x7f;
-	if (!is_rmf_mgmt_action_frame(action_category)) {
+	if (!wlan_mgmt_is_rmf_mgmt_action_frame(action_category)) {
 		p2p_debug("non rmf act frame 0x%x category %x",
 			  tx_ctx->frame_info.sub_type,
 			  action_hdr->action_category);
@@ -1764,13 +1801,15 @@ void p2p_dump_tx_queue(struct p2p_soc_priv_obj *p2p_soc_obj)
 	while (QDF_IS_STATUS_SUCCESS(status)) {
 		tx_ctx = qdf_container_of(p_node,
 				struct tx_action_context, node);
-		p2p_debug("p2p soc object:%pK, tx ctx:%pK, vdev_id:%d, scan_id:%d, roc_cookie:%llx, chan:%d, buf:%pK, len:%d, off_chan:%d, cck:%d, ack:%d, duration:%d",
-			p2p_soc_obj, tx_ctx,
-			tx_ctx->vdev_id, tx_ctx->scan_id,
-			tx_ctx->roc_cookie, tx_ctx->chan,
-			tx_ctx->buf, tx_ctx->buf_len,
-			tx_ctx->off_chan, tx_ctx->no_cck,
-			tx_ctx->no_ack, tx_ctx->duration);
+		p2p_debug("p2p soc object:%pK, tx ctx:%pK, vdev_id:%d, "
+			  "scan_id:%d, roc_cookie:%llx, freq:%d, buf:%pK, "
+			  "len:%d, off_chan:%d, cck:%d, ack:%d, duration:%d",
+			  p2p_soc_obj, tx_ctx,
+			  tx_ctx->vdev_id, tx_ctx->scan_id,
+			  tx_ctx->roc_cookie, tx_ctx->chan_freq,
+			  tx_ctx->buf, tx_ctx->buf_len,
+			  tx_ctx->off_chan, tx_ctx->no_cck,
+			  tx_ctx->no_ack, tx_ctx->duration);
 
 		status = qdf_list_peek_next(&p2p_soc_obj->tx_q_roc,
 						p_node, &p_node);
@@ -1782,13 +1821,15 @@ void p2p_dump_tx_queue(struct p2p_soc_priv_obj *p2p_soc_obj)
 	while (QDF_IS_STATUS_SUCCESS(status)) {
 		tx_ctx = qdf_container_of(p_node,
 				struct tx_action_context, node);
-		p2p_debug("p2p soc object:%pK, tx_ctx:%pK, vdev_id:%d, scan_id:%d, roc_cookie:%llx, chan:%d, buf:%pK, len:%d, off_chan:%d, cck:%d, ack:%d, duration:%d",
-			p2p_soc_obj, tx_ctx,
-			tx_ctx->vdev_id, tx_ctx->scan_id,
-			tx_ctx->roc_cookie, tx_ctx->chan,
-			tx_ctx->buf, tx_ctx->buf_len,
-			tx_ctx->off_chan, tx_ctx->no_cck,
-			tx_ctx->no_ack, tx_ctx->duration);
+		p2p_debug("p2p soc object:%pK, tx_ctx:%pK, vdev_id:%d, "
+			  "scan_id:%d, roc_cookie:%llx, freq:%d, buf:%pK, "
+			  "len:%d, off_chan:%d, cck:%d, ack:%d, duration:%d",
+			  p2p_soc_obj, tx_ctx,
+			  tx_ctx->vdev_id, tx_ctx->scan_id,
+			  tx_ctx->roc_cookie, tx_ctx->chan_freq,
+			  tx_ctx->buf, tx_ctx->buf_len,
+			  tx_ctx->off_chan, tx_ctx->no_cck,
+			  tx_ctx->no_ack, tx_ctx->duration);
 
 		status = qdf_list_peek_next(&p2p_soc_obj->tx_q_ack,
 						p_node, &p_node);
@@ -2878,17 +2919,17 @@ void p2p_rand_mac_tx(struct  tx_action_context *tx_action)
 		return;
 	soc = tx_action->p2p_soc_obj->soc;
 
-	if (!tx_action->no_ack && tx_action->chan &&
+	if (!tx_action->no_ack && tx_action->chan_freq &&
 	    tx_action->buf_len > MIN_MAC_HEADER_LEN &&
 	    p2p_is_vdev_support_rand_mac_by_id(soc, tx_action->vdev_id) &&
 	    p2p_is_random_mac(soc, tx_action->vdev_id,
 			      &tx_action->buf[SRC_MAC_ADDR_OFFSET])) {
 		status = p2p_request_random_mac(
-					soc, tx_action->vdev_id,
-					&tx_action->buf[SRC_MAC_ADDR_OFFSET],
-					wlan_chan_to_freq(tx_action->chan),
-					tx_action->id,
-					tx_action->duration);
+			soc, tx_action->vdev_id,
+			&tx_action->buf[SRC_MAC_ADDR_OFFSET],
+			tx_action->chan_freq,
+			tx_action->id,
+			tx_action->duration);
 		if (status == QDF_STATUS_SUCCESS)
 			tx_action->rand_mac_tx = true;
 		else
@@ -2958,11 +2999,13 @@ QDF_STATUS p2p_process_mgmt_tx(struct tx_action_context *tx_ctx)
 
 	p2p_soc_obj = tx_ctx->p2p_soc_obj;
 
-	p2p_debug("soc:%pK, tx_ctx:%pK, vdev_id:%d, scan_id:%d, roc_cookie:%llx, chan:%d, buf:%pK, len:%d, off_chan:%d, cck:%d, ack:%d, duration:%d",
-		p2p_soc_obj->soc, tx_ctx, tx_ctx->vdev_id,
-		tx_ctx->scan_id, tx_ctx->roc_cookie, tx_ctx->chan,
-		tx_ctx->buf, tx_ctx->buf_len, tx_ctx->off_chan,
-		tx_ctx->no_cck, tx_ctx->no_ack, tx_ctx->duration);
+	p2p_debug("soc:%pK, tx_ctx:%pK, vdev_id:%d, scan_id:%d, "
+		  "roc_cookie:%llx, freq:%d, buf:%pK, len:%d, "
+		  "off_chan:%d, cck:%d, ack:%d, duration:%d",
+		  p2p_soc_obj->soc, tx_ctx, tx_ctx->vdev_id,
+		  tx_ctx->scan_id, tx_ctx->roc_cookie, tx_ctx->chan_freq,
+		  tx_ctx->buf, tx_ctx->buf_len, tx_ctx->off_chan,
+		  tx_ctx->no_cck, tx_ctx->no_ack, tx_ctx->duration);
 
 	status = p2p_get_frame_info(tx_ctx->buf, tx_ctx->buf_len,
 			&(tx_ctx->frame_info));
@@ -2991,8 +3034,8 @@ QDF_STATUS p2p_process_mgmt_tx(struct tx_action_context *tx_ctx)
 		tx_ctx->no_ack = 1;
 	}
 
-	if (!tx_ctx->off_chan || !tx_ctx->chan) {
-		if (!tx_ctx->chan)
+	if (!tx_ctx->off_chan || !tx_ctx->chan_freq) {
+		if (!tx_ctx->chan_freq)
 			p2p_check_and_update_channel(tx_ctx);
 		status = p2p_execute_tx_action_frame(tx_ctx);
 		if (status != QDF_STATUS_SUCCESS) {
@@ -3004,7 +3047,7 @@ QDF_STATUS p2p_process_mgmt_tx(struct tx_action_context *tx_ctx)
 
 	/* For off channel tx case */
 	curr_roc_ctx = p2p_find_current_roc_ctx(p2p_soc_obj);
-	if (curr_roc_ctx && (curr_roc_ctx->chan == tx_ctx->chan)) {
+	if (curr_roc_ctx && (curr_roc_ctx->chan_freq == tx_ctx->chan_freq)) {
 		if ((curr_roc_ctx->roc_state == ROC_STATE_REQUESTED) ||
 		    (curr_roc_ctx->roc_state == ROC_STATE_STARTED)) {
 			tx_ctx->roc_cookie = (uintptr_t)curr_roc_ctx;
@@ -3035,7 +3078,8 @@ QDF_STATUS p2p_process_mgmt_tx(struct tx_action_context *tx_ctx)
 		}
 	}
 
-	curr_roc_ctx = p2p_find_roc_by_chan(p2p_soc_obj, tx_ctx->chan);
+	curr_roc_ctx = p2p_find_roc_by_chan_freq(p2p_soc_obj,
+						 tx_ctx->chan_freq);
 	if (curr_roc_ctx && (curr_roc_ctx->roc_state == ROC_STATE_IDLE)) {
 		tx_ctx->roc_cookie = (uintptr_t)curr_roc_ctx;
 		status = qdf_list_insert_back(

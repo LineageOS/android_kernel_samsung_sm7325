@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2011-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -65,6 +66,7 @@ static void lim_fill_status_code(uint8_t frame_type,
 			*proto_status_code = STATUS_AUTH_TX_FAIL;
 			break;
 		case LIM_ACK_RCD_FAILURE:
+		case LIM_ACK_NOT_RCD:
 			*proto_status_code = STATUS_AUTH_NO_ACK_RECEIVED;
 			break;
 		case LIM_ACK_RCD_SUCCESS:
@@ -79,6 +81,7 @@ static void lim_fill_status_code(uint8_t frame_type,
 			*proto_status_code = STATUS_ASSOC_TX_FAIL;
 			break;
 		case LIM_ACK_RCD_FAILURE:
+		case LIM_ACK_NOT_RCD:
 			*proto_status_code = STATUS_ASSOC_NO_ACK_RECEIVED;
 			break;
 		case LIM_ACK_RCD_SUCCESS:
@@ -353,6 +356,11 @@ lim_post_join_set_link_state_callback(struct mac_context *mac, uint32_t vdev_id,
 	tLimMlmJoinCnf mlm_join_cnf;
 	struct pe_session *session_entry;
 
+	/*
+	 * Allow defered messages after peer create response
+	 */
+	SET_LIM_PROCESS_DEFD_MESGS(mac, true);
+
 	session_entry = pe_find_session_by_vdev_id(mac, vdev_id);
 	if (!session_entry) {
 		pe_err("vdev_id:%d PE session is NULL", vdev_id);
@@ -403,13 +411,22 @@ static void
 lim_process_mlm_post_join_suspend_link(struct mac_context *mac_ctx,
 				       struct pe_session *session)
 {
+	QDF_STATUS status;
+
 	lim_deactivate_and_change_timer(mac_ctx, eLIM_JOIN_FAIL_TIMER);
 
 	/* assign appropriate sessionId to the timer object */
 	mac_ctx->lim.lim_timers.gLimJoinFailureTimer.sessionId =
 		session->peSessionId;
 
-	wma_add_bss_peer_sta(session->vdev_id, session->bssId, true);
+	/*
+	 * Defer msgs to LIM till peer create  confirm event is received
+	 */
+	SET_LIM_PROCESS_DEFD_MESGS(mac_ctx, false);
+	status = wma_add_bss_peer_sta(session->vdev_id, session->bssId, true);
+	if (status == QDF_STATUS_E_RESOURCES)
+		SET_LIM_PROCESS_DEFD_MESGS(mac_ctx, true);
+
 }
 
 /**

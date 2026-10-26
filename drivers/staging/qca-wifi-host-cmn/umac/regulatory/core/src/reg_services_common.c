@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2014-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -1687,7 +1688,7 @@ uint8_t reg_freq_to_chan(struct wlan_objmgr_pdev *pdev,
 	struct wlan_regulatory_pdev_priv_obj *pdev_priv_obj;
 
 	if (freq == 0) {
-		reg_err_rl("Invalid freq %d", freq);
+		reg_debug_rl("Invalid freq %d", freq);
 		return 0;
 	}
 
@@ -3337,7 +3338,7 @@ reg_update_usable_chan_resp(struct wlan_objmgr_pdev *pdev,
 	struct ch_params ch_params = {0};
 	int index = *count;
 
-	for (i = 0; i < len; i++) {
+	for (i = 0; i < len && index < NUM_CHANNELS; i++) {
 		/* In case usable channels are required for multiple filter
 		 * mask, Some frequencies may present in res_msg . To avoid
 		 * frequency duplication, only mode mask is updated for
@@ -3689,6 +3690,8 @@ reg_get_usable_channel_coex_filter(struct wlan_objmgr_pdev *pdev,
 			    chan_list[chan_enum].center_freq &&
 			    freq_range.end_freq >=
 			    chan_list[chan_enum].center_freq) {
+				reg_debug("avoid freq %d",
+					  chan_list[chan_enum].center_freq);
 				reg_remove_freq(res_msg, chan_enum);
 			}
 		}
@@ -3807,16 +3810,15 @@ wlan_reg_get_usable_channel(struct wlan_objmgr_pdev *pdev,
 		}
 	}
 
-	if (req_msg.filter_mask & 1 << FILTER_CELLULAR_COEX)
-		status =
-		reg_get_usable_channel_coex_filter(pdev, req_msg, res_msg,
-						   chan_list, usable_channels);
-
 	if (req_msg.filter_mask & 1 << FILTER_WLAN_CONCURRENCY)
 		status =
 		reg_get_usable_channel_con_filter(pdev, req_msg, res_msg,
 						  usable_channels);
 
+	if (req_msg.filter_mask & 1 << FILTER_CELLULAR_COEX)
+		status =
+		reg_get_usable_channel_coex_filter(pdev, req_msg, res_msg,
+						   chan_list, usable_channels);
 	if (!(req_msg.filter_mask & 1 << FILTER_CELLULAR_COEX) &&
 	    !(req_msg.filter_mask & 1 << FILTER_WLAN_CONCURRENCY))
 		status =
@@ -5111,7 +5113,7 @@ QDF_STATUS reg_get_6g_chan_ap_power(struct wlan_objmgr_pdev *pdev,
 QDF_STATUS reg_get_client_power_for_connecting_ap(struct wlan_objmgr_pdev *pdev,
 						  enum reg_6g_ap_type ap_type,
 						  qdf_freq_t chan_freq,
-						  bool *is_psd,
+						  bool is_psd,
 						  uint16_t *tx_power,
 						  uint16_t *eirp_psd_power)
 {
@@ -5134,8 +5136,7 @@ QDF_STATUS reg_get_client_power_for_connecting_ap(struct wlan_objmgr_pdev *pdev,
 	reg_find_txpower_from_6g_list(chan_freq, master_chan_list,
 				      tx_power);
 
-	*is_psd = reg_is_6g_psd_power(pdev);
-	if (*is_psd)
+	if (is_psd)
 		status = reg_get_6g_chan_psd_eirp_power(chan_freq,
 							master_chan_list,
 							eirp_psd_power);
@@ -5276,5 +5277,22 @@ bool reg_is_upper_6g_edge_ch_disabled(struct wlan_objmgr_psoc *psoc)
 	}
 
 	return psoc_priv_obj->is_upper_6g_edge_ch_disabled;
+}
+
+static inline bool reg_is_within_range_inclusive(enum channel_enum left,
+						 enum channel_enum right,
+						 enum channel_enum idx)
+{
+	return (idx >= left) && (idx <= right);
+}
+
+uint16_t reg_convert_enum_to_6g_idx(enum channel_enum ch_idx)
+{
+	if (!reg_is_within_range_inclusive(MIN_6GHZ_CHANNEL,
+					   MAX_6GHZ_CHANNEL,
+					   ch_idx))
+		return INVALID_CHANNEL;
+
+	return (ch_idx - MIN_6GHZ_CHANNEL);
 }
 #endif

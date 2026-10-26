@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -118,6 +119,22 @@
 #define MAX_SAP_NUM_CONCURRENCY_WITH_NAN 2
 #else
 #define MAX_SAP_NUM_CONCURRENCY_WITH_NAN 1
+#endif
+
+#ifndef BSS_MEMBERSHIP_SELECTOR_HT_PHY
+#define BSS_MEMBERSHIP_SELECTOR_HT_PHY  127
+#endif
+
+#ifndef BSS_MEMBERSHIP_SELECTOR_VHT_PHY
+#define BSS_MEMBERSHIP_SELECTOR_VHT_PHY 126
+#endif
+
+#ifndef BSS_MEMBERSHIP_SELECTOR_SAE_H2E
+#define BSS_MEMBERSHIP_SELECTOR_SAE_H2E 123
+#endif
+
+#ifndef BSS_MEMBERSHIP_SELECTOR_HE_PHY
+#define BSS_MEMBERSHIP_SELECTOR_HE_PHY  122
 #endif
 
 /*
@@ -1331,6 +1348,10 @@ static int calcuate_max_phy_rate(int mode, int nss, int ch_width,
 	if (mode == SIR_SME_PHY_MODE_HT) {
 		/* check for HT Mode */
 		maxidx = ht_mcs_idx;
+		if (maxidx > 7) {
+			hdd_err("ht_mcs_idx %d is incorrect", ht_mcs_idx);
+			return maxrate;
+		}
 		if (nss == 1) {
 			supported_mcs_rate = supported_mcs_rate_nss1;
 		} else if (nss == 2) {
@@ -2940,10 +2961,12 @@ int hdd_softap_set_channel_change(struct net_device *dev, int target_chan_freq,
 	struct sap_context *sap_ctx;
 	uint8_t conc_rule1 = 0;
 	uint8_t scc_on_lte_coex = 0;
+	uint8_t  sta_sap_scc_on_dfs_chnl;
 	bool is_p2p_go_session = false;
 	struct wlan_objmgr_vdev *vdev;
 	bool strict;
 	uint32_t sta_cnt = 0;
+	struct ch_params ch_params = {0};
 
 	hdd_ctx = WLAN_HDD_GET_CTX(adapter);
 	ret = wlan_hdd_validate_context(hdd_ctx);
@@ -2994,9 +3017,16 @@ int hdd_softap_set_channel_change(struct net_device *dev, int target_chan_freq,
 							    NULL);
 	/*
 	 * For non-dbs HW, don't allow Channel switch on DFS channel if STA is
-	 * not connected.
+	 * not connected and sta_sap_scc_on_dfs_chnl is enabled.
 	 */
+	status = policy_mgr_get_sta_sap_scc_on_dfs_chnl(
+				hdd_ctx->psoc, &sta_sap_scc_on_dfs_chnl);
+	if (QDF_STATUS_SUCCESS != status) {
+		return status;
+	}
+
 	if (!sta_cnt && !policy_mgr_is_hw_dbs_capable(hdd_ctx->psoc) &&
+	    !!sta_sap_scc_on_dfs_chnl &&
 	    (wlan_reg_is_dfs_for_freq(hdd_ctx->pdev, target_chan_freq) ||
 	    (wlan_reg_is_5ghz_ch_freq(target_chan_freq) &&
 	     target_bw == CH_WIDTH_160MHZ))) {
@@ -3017,7 +3047,10 @@ int hdd_softap_set_channel_change(struct net_device *dev, int target_chan_freq,
 		hdd_err("Channel switch in progress!!");
 		return -EBUSY;
 	}
-
+	ch_params.ch_width = target_bw;
+	target_bw = wlansap_get_csa_chanwidth_from_phymode(sap_ctx,
+							   target_chan_freq,
+							   &ch_params);
 	/*
 	 * Do SAP concurrency check to cover channel switch case as following:
 	 * There is already existing SAP+GO combination but due to upper layer
@@ -3034,7 +3067,7 @@ int hdd_softap_set_channel_change(struct net_device *dev, int target_chan_freq,
 				hdd_ctx->psoc,
 				policy_mgr_convert_device_mode_to_qdf_type(
 					adapter->device_mode),
-				target_chan_freq,
+				target_chan_freq, policy_mgr_get_bw(target_bw),
 				adapter->vdev_id,
 				forced,
 				sap_ctx->csa_reason)) {
@@ -4028,12 +4061,33 @@ static void wlan_hdd_check_11gmode(const u8 *ie, u8 *require_ht,
 			}
 		} else {
 			if ((BASIC_RATE_MASK |
-				WLAN_BSS_MEMBERSHIP_SELECTOR_HT_PHY) == ie[i])
+			     BSS_MEMBERSHIP_SELECTOR_HT_PHY) == ie[i])
 				*require_ht = true;
 			else if ((BASIC_RATE_MASK |
-				WLAN_BSS_MEMBERSHIP_SELECTOR_VHT_PHY) == ie[i])
+				  BSS_MEMBERSHIP_SELECTOR_VHT_PHY) == ie[i])
 				*require_vht = true;
 		}
+	}
+}
+
+/**
+ * wlan_hdd_check_h2e() - check SAE/H2E require flag from support rate sets
+ * @rs: support rate or extended support rate set
+ * @require_h2e: pointer to store require h2e flag
+ *
+ * Return: none
+ */
+static void wlan_hdd_check_h2e(const tSirMacRateSet *rs, bool *require_h2e)
+{
+	uint8_t i;
+
+	if (!rs || !require_h2e)
+		return;
+
+	for (i = 0; i < rs->numRates; i++) {
+		if (rs->rate[i] == (BASIC_RATE_MASK |
+				    BSS_MEMBERSHIP_SELECTOR_SAE_H2E))
+			*require_h2e = true;
 	}
 }
 
@@ -4926,9 +4980,8 @@ int wlan_hdd_restore_channels(struct hdd_context *hdd_ctx)
 	}
 
 	for (i = 0; i < cache_chann->num_channels; i++) {
-		freq = wlan_reg_chan_to_freq(
-				hdd_ctx->pdev,
-				cache_chann->channel_info[i].channel_num);
+		freq = cache_chann->channel_info[i].freq;
+
 		if (!freq)
 			continue;
 
@@ -4943,8 +4996,8 @@ int wlan_hdd_restore_channels(struct hdd_context *hdd_ctx)
 		wiphy_channel->flags =
 				cache_chann->channel_info[i].wiphy_status;
 
-		hdd_debug("Restore channel %d reg_stat %d wiphy_stat 0x%x",
-			  cache_chann->channel_info[i].channel_num,
+		hdd_debug("Restore channel_freq %d reg_stat %d wiphy_stat 0x%x",
+			  cache_chann->channel_info[i].freq,
 			  cache_chann->channel_info[i].reg_status,
 			  wiphy_channel->flags);
 	}
@@ -4996,8 +5049,8 @@ int wlan_hdd_disable_channels(struct hdd_context *hdd_ctx)
 	}
 
 	for (i = 0; i < cache_chann->num_channels; i++) {
-		freq = wlan_reg_legacy_chan_to_freq(hdd_ctx->pdev,
-						    cache_chann->channel_info[i].channel_num);
+		freq = cache_chann->channel_info[i].freq;
+
 		if (!freq)
 			continue;
 		wiphy_channel = wlan_hdd_get_wiphy_channel(wiphy, freq);
@@ -5014,8 +5067,8 @@ int wlan_hdd_disable_channels(struct hdd_context *hdd_ctx)
 							freq);
 		cache_chann->channel_info[i].wiphy_status =
 							wiphy_channel->flags;
-		hdd_debug("Disable channel %d reg_stat %d wiphy_stat 0x%x",
-			  cache_chann->channel_info[i].channel_num,
+		hdd_debug("Disable channel_freq %d reg_stat %d wiphy_stat 0x%x",
+			  cache_chann->channel_info[i].freq,
 			  cache_chann->channel_info[i].reg_status,
 			  wiphy_channel->flags);
 
@@ -5219,24 +5272,21 @@ int wlan_hdd_cfg80211_start_bss(struct hdd_adapter *adapter,
 			return -EINVAL;
 		}
 	}
+
 	/*
-	 * For STA+SAP concurrency support from GUI, first STA connection gets
-	 * triggered and while it is in progress, SAP start also comes up.
-	 * Once STA association is successful, STA connect event is sent to
-	 * kernel which gets queued in kernel workqueue and supplicant won't
-	 * process M1 received from AP and send M2 until this NL80211_CONNECT
-	 * event is received. Workqueue is not scheduled as RTNL lock is already
-	 * taken by hostapd thread which has issued start_bss command to driver.
-	 * Driver cannot complete start_bss as the pending command at the head
-	 * of the SME command pending list is hw_mode_update for STA session
-	 * which cannot be processed as SME is in WAITforKey state for STA
-	 * interface. The start_bss command for SAP interface is queued behind
-	 * the hw_mode_update command and so it cannot be processed until
-	 * hw_mode_update command is processed. This is causing a deadlock so
-	 * disconnect the STA interface first if connection or key exchange is
-	 * in progress and then start SAP interface.
+	 * For STA+SAP/GO concurrency support from GUI, In case if
+	 * START AP/GO request comes just before the SAE authentication
+	 * completion on STA, SAE AUTH REQ waits for START AP RSP and
+	 * START AP RSP waits to complete SAE AUTH REQ.
+	 * Driver completes START AP RSP only upon SAE AUTH REQ timeout(5 sec)
+	 * as start ap will be in serialization pending queue, and SAE auth
+	 * sequence cannot complete as hostap thread is blocked in start ap
+	 * cfg80211 ops.
+	 * To avoid above deadlock until SAE timeout, abort the SAE connection
+	 * immediately and complete START AP/GO asap so that the upper layer
+	 * can trigger a fresh connection after START AP/GO completion.
 	 */
-	hdd_abort_ongoing_sta_connection(hdd_ctx);
+	hdd_abort_ongoing_sta_sae_connection(hdd_ctx, adapter);
 
 	mac_handle = hdd_ctx->mac_handle;
 
@@ -5669,6 +5719,12 @@ int wlan_hdd_cfg80211_start_bss(struct hdd_adapter *adapter,
 					   config->extended_rates.rate,
 					   config->extended_rates.numRates);
 		}
+
+		config->require_h2e = false;
+		wlan_hdd_check_h2e(&config->supported_rates,
+				   &config->require_h2e);
+		wlan_hdd_check_h2e(&config->extended_rates,
+				   &config->require_h2e);
 	}
 
 	if (!cds_is_sub_20_mhz_enabled())
@@ -5842,7 +5898,7 @@ int wlan_hdd_cfg80211_start_bss(struct hdd_adapter *adapter,
 		goto error;
 	}
 
-	qdf_status = qdf_wait_for_event_completion(&hostapd_state->qdf_event,
+	qdf_status = qdf_wait_single_event(&hostapd_state->qdf_event,
 					SME_CMD_START_BSS_TIMEOUT);
 
 	wlansap_reset_sap_config_add_ie(config, eUPDATE_IE_ALL);
@@ -5859,7 +5915,8 @@ int wlan_hdd_cfg80211_start_bss(struct hdd_adapter *adapter,
 		hdd_set_connection_in_progress(false);
 		sme_get_command_q_status(mac_handle);
 		wlansap_stop_bss(WLAN_HDD_GET_SAP_CTX_PTR(adapter));
-		QDF_ASSERT(0);
+		if (!cds_is_driver_recovering())
+			QDF_ASSERT(0);
 		ret = -EINVAL;
 		goto error;
 	}
@@ -6000,6 +6057,21 @@ static int __wlan_hdd_cfg80211_stop_ap(struct wiphy *wiphy,
 		goto exit;
 	}
 
+	/*
+	 * For STA+SAP/GO concurrency support from GUI, In case if
+	 * STOP AP/GO request comes just before the SAE authentication
+	 * completion on STA, SAE AUTH REQ waits for STOP AP RSP and
+	 * STOP AP RSP waits to complete SAE AUTH REQ.
+	 * Driver completes STOP AP RSP only upon SAE AUTH REQ timeout(5 sec)
+	 * as stop ap will be in serialization pending queue, and SAE auth
+	 * sequence cannot complete as hostap thread is blocked in stop ap
+	 * cfg80211 ops.
+	 * To avoid above deadlock until SAE timeout, abort the SAE connection
+	 * immediately and complete STOP AP/GO asap so that the upper layer
+	 * can trigger a fresh connection after STOP AP/GO completion.
+	 */
+	hdd_abort_ongoing_sta_sae_connection(hdd_ctx, adapter);
+
 	/* Clear SOFTAP_INIT_DONE flag to mark stop_ap deinit. So that we do
 	 * not restart SAP after SSR as SAP is already stopped from user space.
 	 * This update is moved to start of this function to resolve stop_ap
@@ -6008,13 +6080,6 @@ static int __wlan_hdd_cfg80211_stop_ap(struct wiphy *wiphy,
 	clear_bit(SOFTAP_INIT_DONE, &adapter->event_flags);
 	hdd_debug("Device_mode %s(%d)",
 		  qdf_opmode_str(adapter->device_mode), adapter->device_mode);
-
-	/*
-	 * If a STA connection is in progress in another adapter, disconnect
-	 * the STA and complete the SAP operation. STA will reconnect
-	 * after SAP stop is done.
-	 */
-	hdd_abort_ongoing_sta_connection(hdd_ctx);
 
 	if (adapter->device_mode == QDF_SAP_MODE) {
 		wlan_hdd_del_station(adapter);
@@ -6300,6 +6365,9 @@ wlan_hdd_ap_ap_force_scc_override(struct hdd_adapter *adapter,
 		return false;
 	}
 
+	if (adapter->device_mode == QDF_P2P_GO_MODE &&
+	    policy_mgr_is_p2p_p2p_conc_supported(hdd_ctx->psoc))
+		return false;
 	if (!policy_mgr_concurrent_beaconing_sessions_running(hdd_ctx->psoc))
 		return false;
 	if (policy_mgr_dual_beacon_on_single_mac_mcc_capable(hdd_ctx->psoc))

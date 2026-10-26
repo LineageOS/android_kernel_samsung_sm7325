@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -783,6 +784,41 @@ static bool is_mcc_preferred(struct sap_context *sap_context,
 	return false;
 }
 
+#ifdef WLAN_FEATURE_P2P_P2P_STA
+/**
+ * sap_set_forcescc_required - set force scc flag for provided p2p go vdev
+ *
+ * vdev_id - vdev_id for which flag needs to be set
+ *
+ * Return: None
+ */
+static void sap_set_forcescc_required(uint8_t vdev_id)
+{
+	struct mac_context *mac_ctx;
+	struct sap_context *sap_ctx;
+	uint8_t i = 0;
+
+	mac_ctx = sap_get_mac_context();
+	if (!mac_ctx) {
+		sap_err("Invalid MAC context");
+		return;
+	}
+
+	for (i = 0; i < SAP_MAX_NUM_SESSION; i++) {
+		sap_ctx = mac_ctx->sap.sapCtxList[i].sap_context;
+		if (QDF_P2P_GO_MODE == mac_ctx->sap.sapCtxList[i].sapPersona &&
+		    sap_ctx->sessionId == vdev_id) {
+			sap_debug("update forcescc restart for vdev %d",
+				  vdev_id);
+			sap_ctx->is_forcescc_restart_required = true;
+		}
+	}
+}
+#else
+static void sap_set_forcescc_required(uint8_t vdev_id)
+{}
+#endif
+
 QDF_STATUS
 sap_validate_chan(struct sap_context *sap_context,
 		  bool pre_start_bss,
@@ -797,7 +833,9 @@ sap_validate_chan(struct sap_context *sap_context,
 	uint32_t sta_sap_bit_mask = QDF_STA_MASK | QDF_SAP_MASK;
 	uint32_t concurrent_state;
 	bool go_force_scc;
-	struct ch_params ch_params;
+	struct ch_params ch_params = {0};
+	bool is_go_scc_strict = false;
+	uint8_t first_p2p_go_vdev_id = WLAN_UMAC_VDEV_ID_MAX;
 
 	mac_handle = cds_get_context(QDF_MODULE_ID_SME);
 	mac_ctx = MAC_CONTEXT(mac_handle);
@@ -811,10 +849,45 @@ sap_validate_chan(struct sap_context *sap_context,
 		sap_err("Invalid channel");
 		return QDF_STATUS_E_FAILURE;
 	}
-	go_force_scc = policy_mgr_go_scc_enforced(mac_ctx->psoc);
-	if (sap_context->vdev && !go_force_scc &&
-	    (wlan_vdev_mlme_get_opmode(sap_context->vdev) == QDF_P2P_GO_MODE))
-		goto validation_done;
+
+	if (sap_context->vdev &&
+	    sap_context->vdev->vdev_mlme.vdev_opmode == QDF_P2P_GO_MODE) {
+	       /*
+		* check whether go_force_scc is enabled or not.
+		* If it not enabled then don't any force scc on existing and new
+		* p2p go vdevs.
+		* Otherwise, if it is enabled then check whether it's in strict
+		* mode or liberal mode.
+		* For strict mode, do force scc on newly p2p go to existing p2p
+		* go channel.
+		* For liberal mode, first form new p2p go on requested channel.
+		* Once set key is done, do force scc on existing p2p go to new
+		* p2p go channel.
+		*/
+		go_force_scc = policy_mgr_go_scc_enforced(mac_ctx->psoc);
+		sap_debug("go force scc value %d", go_force_scc);
+		if (go_force_scc) {
+			is_go_scc_strict =
+				policy_mgr_is_go_scc_strict(mac_ctx->psoc);
+			if (!is_go_scc_strict) {
+				sap_debug("liberal mode is enabled");
+				first_p2p_go_vdev_id =
+					policy_mgr_check_forcescc_for_other_go(
+						mac_ctx->psoc,
+						sap_context->sessionId,
+						sap_context->chan_freq);
+
+				if (first_p2p_go_vdev_id <
+				    WLAN_UMAC_VDEV_ID_MAX) {
+					sap_set_forcescc_required(
+							first_p2p_go_vdev_id);
+					goto validation_done;
+				}
+			}
+		} else {
+			goto validation_done;
+		}
+	}
 
 	concurrent_state = policy_mgr_get_concurrency_mode(mac_ctx->psoc);
 	if (policy_mgr_concurrent_beaconing_sessions_running(mac_ctx->psoc) ||
@@ -837,7 +910,15 @@ sap_validate_chan(struct sap_context *sap_context,
 					sap_context->cc_switch_mode);
 			sap_debug("After check overlap: sap freq %d con freq:%d",
 				  sap_context->chan_freq, con_ch_freq);
-			ch_params = sap_context->ch_params;
+			/*
+			 * For non-DBS platform, a 2.4Ghz can become a 5Ghz freq
+			 * so lets used max BW in that case, if it remain 2.4Ghz
+			 * then BW will be limited to 20 anyway
+			 */
+			if (WLAN_REG_IS_24GHZ_CH_FREQ(sap_context->chan_freq))
+				ch_params.ch_width = CH_WIDTH_MAX;
+			else
+				ch_params = sap_context->ch_params;
 
 			if (sap_context->cc_switch_mode !=
 		QDF_MCC_TO_SCC_SWITCH_FORCE_PREFERRED_WITHOUT_DISCONNECTION) {
@@ -851,6 +932,9 @@ sap_validate_chan(struct sap_context *sap_context,
 					return QDF_STATUS_E_ABORTED;
 				}
 			}
+			/* if CH width didn't change fallback to original */
+			if (ch_params.ch_width == CH_WIDTH_MAX)
+				ch_params = sap_context->ch_params;
 
 			sap_debug("After check concurrency: con freq:%d",
 				  con_ch_freq);
@@ -1492,7 +1576,7 @@ QDF_STATUS sap_signal_hdd_event(struct sap_context *sap_ctx,
 		bss_complete->status = (eSapStatus) context;
 		bss_complete->staId = sap_ctx->sap_sta_id;
 
-		sap_info("(eSAP_START_BSS_EVENT): staId = %d",
+		sap_debug("(eSAP_START_BSS_EVENT): staId = %d",
 			  bss_complete->staId);
 
 		bss_complete->operating_chan_freq = sap_ctx->chan_freq;
@@ -1935,8 +2019,8 @@ static QDF_STATUS sap_cac_start_notify(mac_handle_t mac_handle)
 			/* Don't start CAC for non-dfs channel, its violation */
 			profile = &sap_context->csr_roamProfile;
 			ch_freq = profile->op_freq;
-			if (!wlan_reg_is_dfs_for_freq(mac->pdev,
-						      ch_freq))
+			if (!wlan_reg_is_dfs_for_freq(mac->pdev, ch_freq) &&
+				wlan_reg_get_5g_bonded_channel_state_for_freq(mac->pdev, ch_freq, profile->ch_params.ch_width) != CHANNEL_STATE_DFS)
 				continue;
 			sap_debug("sapdfs: Signaling eSAP_DFS_CAC_START to HDD for sapctx[%pK]",
 				  sap_context);
@@ -2288,6 +2372,10 @@ static QDF_STATUS sap_goto_starting(struct sap_context *sap_ctx,
 			     eSAP_CHANNEL_CHANGE_EVENT,
 			     (void *)eSAP_STATUS_SUCCESS);
 	sap_dfs_set_current_channel(sap_ctx);
+	/* Reset radar found flag before start sap, the flag will
+	 * be set when radar found in CAC wait.
+	 */
+	mac_ctx->sap.SapDfsInfo.sap_radar_found_status = false;
 
 	sap_debug("session: %d", sap_ctx->sessionId);
 
@@ -2429,7 +2517,7 @@ static QDF_STATUS sap_fsm_handle_radar_during_cac(struct sap_context *sap_ctx,
 }
 
 /**
- * sap_fsm_handle_start_failure() - handle start failure or stop during cac wait
+ * sap_fsm_handle_start_failure() - handle sap start failure
  * @sap_ctx: SAP context
  * @msg: event msg
  * @mac_handle: Opaque handle to the global MAC context
@@ -2442,13 +2530,11 @@ static QDF_STATUS sap_fsm_handle_start_failure(struct sap_context *sap_ctx,
 {
 	QDF_STATUS qdf_status = QDF_STATUS_E_FAILURE;
 
-	if (msg == eSAP_HDD_STOP_INFRA_BSS &&
-	    (QDF_IS_STATUS_SUCCESS(wlan_vdev_is_dfs_cac_wait(sap_ctx->vdev)) ||
-	     QDF_IS_STATUS_SUCCESS(
-	     wlan_vdev_is_restart_progress(sap_ctx->vdev)))) {
+	if (msg == eSAP_HDD_STOP_INFRA_BSS) {
 		/* Transition from SAP_STARTING to SAP_STOPPING */
-		sap_debug("In cac wait state from state %s => %s",
+		sap_debug("SAP start is in progress, state from state %s => %s",
 			  "SAP_STARTING", "SAP_STOPPING");
+
 		/*
 		 * Stop the CAC timer only in following conditions
 		 * single AP: if there is a single AP then stop timer
@@ -2652,6 +2738,7 @@ static QDF_STATUS sap_fsm_state_starting(struct sap_context *sap_ctx,
 							       mac_handle);
 			} else {
 				sap_debug("skip cac timer");
+				mac_ctx->sap.SapDfsInfo.sap_radar_found_status = false;
 				/*
 				 * If hostapd starts AP on dfs channel,
 				 * hostapd will wait for CAC START/CAC END
@@ -3108,6 +3195,8 @@ sapconvert_to_csr_profile(struct sap_config *config, eCsrRoamBssType bssType,
 		profile->extended_rates.numRates =
 			config->extended_rates.numRates;
 	}
+
+	profile->require_h2e = config->require_h2e;
 
 	qdf_status = ucfg_mlme_get_sap_chan_switch_rate_enabled(
 					mac_ctx->psoc,

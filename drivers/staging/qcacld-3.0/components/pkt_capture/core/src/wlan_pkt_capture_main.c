@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2020-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -34,6 +35,7 @@
 #include "wlan_pkt_capture_tgt_api.h"
 #include <cds_ieee80211_common.h>
 #include "wlan_vdev_mgr_utils_api.h"
+#include "host_diag_core_event.h"
 
 static struct wlan_objmgr_vdev *gp_pkt_capture_vdev;
 
@@ -124,8 +126,8 @@ static void pkt_capture_wdi_event_unsubscribe(struct wlan_objmgr_psoc *psoc)
 			    WDI_EVENT_PKT_CAPTURE_OFFLOAD_TX_DATA);
 
 	/* unsubscribe for rx data no peer packets */
-	cdp_wdi_event_sub(soc, pdev_id, &PKT_CAPTURE_RX_NO_PEER_SUBSCRIBER,
-			  WDI_EVENT_PKT_CAPTURE_RX_DATA_NO_PEER);
+	cdp_wdi_event_unsub(soc, pdev_id, &PKT_CAPTURE_RX_NO_PEER_SUBSCRIBER,
+			    WDI_EVENT_PKT_CAPTURE_RX_DATA_NO_PEER);
 
 	/* unsubscribing for rx data packets */
 	cdp_wdi_event_unsub(soc, pdev_id, &PKT_CAPTURE_RX_SUBSCRIBER,
@@ -142,9 +144,11 @@ pkt_capture_get_pktcap_mode_v2(void)
 	enum pkt_capture_mode mode = PACKET_CAPTURE_MODE_DISABLE;
 	struct pkt_capture_vdev_priv *vdev_priv;
 	struct wlan_objmgr_vdev *vdev;
+	QDF_STATUS status = QDF_STATUS_SUCCESS;
 
 	vdev = pkt_capture_get_vdev();
-	if (!vdev)
+	status = pkt_capture_vdev_get_ref(vdev);
+	if (QDF_IS_STATUS_ERROR(status))
 		return PACKET_CAPTURE_MODE_DISABLE;
 
 	vdev_priv = pkt_capture_vdev_get_priv(vdev);
@@ -153,6 +157,7 @@ pkt_capture_get_pktcap_mode_v2(void)
 	else
 		mode = vdev_priv->cfg_params.pkt_capture_mode;
 
+	pkt_capture_vdev_put_ref(vdev);
 	return mode;
 }
 
@@ -207,19 +212,23 @@ pkt_capture_process_ppdu_stats(void *log_data)
 	struct pkt_capture_ppdu_stats_q_node *q_node;
 	htt_ppdu_stats_for_smu_tlv *smu;
 	uint32_t stats_len;
+	QDF_STATUS status = QDF_STATUS_SUCCESS;
 
 	vdev = pkt_capture_get_vdev();
-	if (qdf_unlikely(!vdev))
+	status = pkt_capture_vdev_get_ref(vdev);
+	if (QDF_IS_STATUS_ERROR(status))
 		return;
 
 	vdev_priv = pkt_capture_vdev_get_priv(vdev);
-	if (qdf_unlikely(!vdev_priv))
+	if (qdf_unlikely(!vdev_priv)) {
+		pkt_capture_vdev_put_ref(vdev);
 		return;
+	}
 
 	smu = (htt_ppdu_stats_for_smu_tlv *)log_data;
 	vdev_priv->tx_nss = smu->nss;
 
-	qdf_spin_lock(&vdev_priv->lock_q);
+	qdf_spin_lock_bh(&vdev_priv->lock_q);
 	if (qdf_list_size(&vdev_priv->ppdu_stats_q) <
 					PPDU_STATS_Q_MAX_SIZE) {
 		/*
@@ -227,7 +236,8 @@ pkt_capture_process_ppdu_stats(void *log_data)
 		 * we support only 256 bit ba bitmap.
 		 */
 		if (smu->win_size > 8) {
-			qdf_spin_unlock(&vdev_priv->lock_q);
+			qdf_spin_unlock_bh(&vdev_priv->lock_q);
+			pkt_capture_vdev_put_ref(vdev);
 			pkt_capture_err("win size %d > 8 not supported\n",
 					smu->win_size);
 			return;
@@ -238,7 +248,8 @@ pkt_capture_process_ppdu_stats(void *log_data)
 
 		q_node = qdf_mem_malloc(sizeof(*q_node) + stats_len);
 		if (q_node == NULL) {
-			qdf_spin_unlock(&vdev_priv->lock_q);
+			qdf_spin_unlock_bh(&vdev_priv->lock_q);
+			pkt_capture_vdev_put_ref(vdev);
 			pkt_capture_err("stats node and buf allocation fail\n");
 			return;
 		}
@@ -248,7 +259,8 @@ pkt_capture_process_ppdu_stats(void *log_data)
 		qdf_list_insert_back(&vdev_priv->ppdu_stats_q,
 				     &q_node->node);
 	}
-	qdf_spin_unlock(&vdev_priv->lock_q);
+	qdf_spin_unlock_bh(&vdev_priv->lock_q);
+	pkt_capture_vdev_put_ref(vdev);
 }
 
 static void
@@ -257,7 +269,7 @@ pkt_capture_process_tx_data(void *soc, void *log_data, u_int16_t vdev_id,
 {
 	struct dp_soc *psoc = soc;
 	uint8_t tid = 0;
-	uint8_t bssid[QDF_MAC_ADDR_SIZE];
+	uint8_t bssid[QDF_MAC_ADDR_SIZE] = {0};
 	struct pkt_capture_tx_hdr_elem_t *ptr_pktcapture_hdr;
 	struct pkt_capture_tx_hdr_elem_t pktcapture_hdr = {0};
 	struct hal_tx_completion_status tx_comp_status = {0};
@@ -281,8 +293,8 @@ pkt_capture_process_tx_data(void *soc, void *log_data, u_int16_t vdev_id,
 	/* nss not available */
 	pktcapture_hdr.nss = 0;
 	pktcapture_hdr.rssi_comb = tx_comp_status.ack_frame_rssi;
-	/* rate not available */
-	pktcapture_hdr.rate = 0;
+	/* update rate from available mcs */
+	pktcapture_hdr.rate = tx_comp_status.mcs;
 	pktcapture_hdr.stbc = tx_comp_status.stbc;
 	pktcapture_hdr.sgi = tx_comp_status.sgi;
 	pktcapture_hdr.ldpc = tx_comp_status.ldpc;
@@ -395,7 +407,7 @@ pkt_capture_process_tx_data(void *soc, void *log_data, u_int16_t vdev_id,
  * Return: true, if filter bit is set
  *         false, if filter bit is not set
  */
-static bool
+bool
 pkt_capture_is_frame_filter_set(qdf_nbuf_t buf,
 				struct pkt_capture_frame_filter *frame_filter,
 				bool direction)
@@ -471,19 +483,22 @@ pkt_capture_is_frame_filter_set(qdf_nbuf_t buf,
 void pkt_capture_callback(void *soc, enum WDI_EVENT event, void *log_data,
 			  u_int16_t peer_id, uint32_t status)
 {
-	uint8_t bssid[QDF_MAC_ADDR_SIZE];
+	uint8_t bssid[QDF_MAC_ADDR_SIZE] = {0};
 	struct wlan_objmgr_vdev *vdev;
 	struct pkt_capture_vdev_priv *vdev_priv;
 	struct pkt_capture_frame_filter *frame_filter;
 	uint16_t vdev_id = 0;
+	QDF_STATUS ret = QDF_STATUS_SUCCESS;
 
 	vdev = pkt_capture_get_vdev();
-	if (!vdev)
+	ret = pkt_capture_vdev_get_ref(vdev);
+	if (QDF_IS_STATUS_ERROR(ret))
 		return;
 
 	vdev_priv = pkt_capture_vdev_get_priv(vdev);
 	if (!vdev_priv) {
 		pkt_capture_err("vdev priv is NULL");
+		pkt_capture_vdev_put_ref(vdev);
 		return;
 	}
 
@@ -494,8 +509,10 @@ void pkt_capture_callback(void *soc, enum WDI_EVENT event, void *log_data,
 	{
 		struct dp_tx_desc_s *desc = log_data;
 
-		if (!frame_filter->data_tx_frame_filter)
+		if (!frame_filter->data_tx_frame_filter) {
+			pkt_capture_vdev_put_ref(vdev);
 			return;
+		}
 
 		if (frame_filter->data_tx_frame_filter &
 		    PKT_CAPTURE_DATA_FRAME_TYPE_ALL) {
@@ -506,7 +523,6 @@ void pkt_capture_callback(void *soc, enum WDI_EVENT event, void *log_data,
 			pkt_capture_process_tx_data(soc, log_data,
 						    vdev_id, status);
 		}
-
 		break;
 	}
 
@@ -521,6 +537,8 @@ void pkt_capture_callback(void *soc, enum WDI_EVENT event, void *log_data,
 			 */
 			if (status == RX_OFFLOAD_PKT)
 				qdf_nbuf_free(nbuf);
+
+			pkt_capture_vdev_put_ref(vdev);
 			return;
 		}
 
@@ -551,6 +569,8 @@ void pkt_capture_callback(void *soc, enum WDI_EVENT event, void *log_data,
 			 */
 			if (status == RX_OFFLOAD_PKT)
 				qdf_nbuf_free(nbuf);
+
+			pkt_capture_vdev_put_ref(vdev);
 			return;
 		}
 
@@ -575,11 +595,11 @@ void pkt_capture_callback(void *soc, enum WDI_EVENT event, void *log_data,
 		struct htt_tx_offload_deliver_ind_hdr_t *offload_deliver_msg;
 		bool is_pkt_during_roam = false;
 		uint32_t freq = 0;
-		qdf_nbuf_t buf = log_data +
-				sizeof(struct htt_tx_offload_deliver_ind_hdr_t);
 
-		if (!frame_filter->data_tx_frame_filter)
+		if (!frame_filter->data_tx_frame_filter) {
+			pkt_capture_vdev_put_ref(vdev);
 			return;
+		}
 
 		offload_deliver_msg =
 		(struct htt_tx_offload_deliver_ind_hdr_t *)log_data;
@@ -594,17 +614,9 @@ void pkt_capture_callback(void *soc, enum WDI_EVENT event, void *log_data,
 			vdev_id = offload_deliver_msg->vdev_id;
 		}
 
-		if (frame_filter->data_tx_frame_filter &
-		    PKT_CAPTURE_DATA_FRAME_TYPE_ALL) {
-			pkt_capture_offload_deliver_indication_handler(
+		pkt_capture_offload_deliver_indication_handler(
 							log_data,
 							vdev_id, bssid, soc);
-		} else if (pkt_capture_is_frame_filter_set(
-			   buf, frame_filter, IEEE80211_FC1_DIR_TODS)) {
-			pkt_capture_offload_deliver_indication_handler(
-							log_data,
-							vdev_id, bssid, soc);
-		}
 		break;
 	}
 
@@ -615,6 +627,7 @@ void pkt_capture_callback(void *soc, enum WDI_EVENT event, void *log_data,
 	default:
 		break;
 	}
+	pkt_capture_vdev_put_ref(vdev);
 }
 
 #else
@@ -654,23 +667,34 @@ bool pkt_capture_is_tx_mgmt_enable(struct wlan_objmgr_pdev *pdev)
 {
 	struct pkt_capture_vdev_priv *vdev_priv;
 	struct wlan_objmgr_vdev *vdev;
+	QDF_STATUS status = QDF_STATUS_SUCCESS;
+	enum pkt_capture_config config;
 
 	vdev = pkt_capture_get_vdev();
-	if (!vdev) {
-		pkt_capture_err("vdev is NULL");
+	status = pkt_capture_vdev_get_ref(vdev);
+	if (QDF_IS_STATUS_ERROR(status)) {
+		pkt_capture_err("failed to get vdev ref");
 		return false;
 	}
 
 	vdev_priv = pkt_capture_vdev_get_priv(vdev);
 	if (!vdev_priv) {
 		pkt_capture_err("vdev_priv is NULL");
+		pkt_capture_vdev_put_ref(vdev);
 		return false;
 	}
 
-	if (!(vdev_priv->frame_filter.mgmt_tx_frame_filter &
-	    PKT_CAPTURE_MGMT_FRAME_TYPE_ALL))
-		return false;
+	config = pkt_capture_get_pktcap_config(vdev);
 
+	if (!(vdev_priv->frame_filter.mgmt_tx_frame_filter &
+	    PKT_CAPTURE_MGMT_FRAME_TYPE_ALL)) {
+		if (!(config & PACKET_CAPTURE_CONFIG_QOS_ENABLE)) {
+			pkt_capture_vdev_put_ref(vdev);
+			return false;
+		}
+	}
+
+	pkt_capture_vdev_put_ref(vdev);
 	return true;
 }
 
@@ -680,6 +704,7 @@ pkt_capture_register_callbacks(struct wlan_objmgr_vdev *vdev,
 			       void *context)
 {
 	struct pkt_capture_vdev_priv *vdev_priv;
+	struct pkt_psoc_priv *psoc_priv;
 	struct wlan_objmgr_psoc *psoc;
 	enum pkt_capture_mode mode;
 	QDF_STATUS status;
@@ -710,10 +735,18 @@ pkt_capture_register_callbacks(struct wlan_objmgr_vdev *vdev,
 		goto mgmt_rx_ops_fail;
 	}
 
-	target_if_pkt_capture_register_tx_ops(&vdev_priv->tx_ops);
-	target_if_pkt_capture_register_rx_ops(&vdev_priv->rx_ops);
+	psoc_priv = pkt_capture_psoc_get_priv(psoc);
+	if (!psoc_priv) {
+		pkt_capture_err("psoc_priv is NULL");
+		return QDF_STATUS_E_INVAL;
+	}
+
+	target_if_pkt_capture_register_tx_ops(&psoc_priv->tx_ops);
+	target_if_pkt_capture_register_rx_ops(&psoc_priv->rx_ops);
 	pkt_capture_wdi_event_subscribe(psoc);
 	pkt_capture_record_channel(vdev);
+	vdev_priv->curr_freq = vdev->vdev_mlme.des_chan->ch_freq;
+	vdev_priv->last_freq = vdev_priv->curr_freq;
 
 	status = tgt_pkt_capture_register_ev_handler(vdev);
 	if (QDF_IS_STATUS_ERROR(status))
@@ -732,6 +765,10 @@ pkt_capture_register_callbacks(struct wlan_objmgr_vdev *vdev,
 		pkt_capture_err("Unable to send packet capture mode to fw");
 		goto send_mode_fail;
 	}
+
+	qdf_wake_lock_acquire(&vdev_priv->wake_lock,
+			      WIFI_POWER_EVENT_WAKELOCK_MONITOR_MODE);
+	qdf_runtime_pm_prevent_suspend(&vdev_priv->runtime_lock);
 
 	return QDF_STATUS_SUCCESS;
 
@@ -781,6 +818,7 @@ QDF_STATUS pkt_capture_deregister_callbacks(struct wlan_objmgr_vdev *vdev)
 		  &vdev_priv->mon_ctx->mon_event_flag);
 	set_bit(PKT_CAPTURE_RX_POST_EVENT,
 		&vdev_priv->mon_ctx->mon_event_flag);
+	reinit_completion(&vdev_priv->mon_ctx->mon_register_event);
 	wake_up_interruptible(&vdev_priv->mon_ctx->mon_wait_queue);
 
 	/*
@@ -801,6 +839,10 @@ QDF_STATUS pkt_capture_deregister_callbacks(struct wlan_objmgr_vdev *vdev)
 
 	vdev_priv->cb_ctx->mon_cb = NULL;
 	vdev_priv->cb_ctx->mon_ctx = NULL;
+
+	qdf_wake_lock_release(&vdev_priv->wake_lock,
+			      WIFI_POWER_EVENT_WAKELOCK_MONITOR_MODE);
+	qdf_runtime_pm_allow_suspend(&vdev_priv->runtime_lock);
 
 	return QDF_STATUS_SUCCESS;
 }
@@ -1054,6 +1096,8 @@ pkt_capture_vdev_create_notification(struct wlan_objmgr_vdev *vdev, void *arg)
 	}
 	qdf_spinlock_create(&vdev_priv->lock_q);
 	qdf_list_create(&vdev_priv->ppdu_stats_q, PPDU_STATS_Q_MAX_SIZE);
+	qdf_wake_lock_create(&vdev_priv->wake_lock, "pkt_capture_mode");
+	qdf_runtime_lock_init(&vdev_priv->runtime_lock);
 
 	return status;
 
@@ -1089,6 +1133,9 @@ pkt_capture_vdev_destroy_notification(struct wlan_objmgr_vdev *vdev, void *arg)
 		pkt_capture_err("vdev priv is NULL");
 		return QDF_STATUS_E_FAILURE;
 	}
+
+	qdf_runtime_lock_deinit(&vdev_priv->runtime_lock);
+	qdf_wake_lock_destroy(&vdev_priv->wake_lock);
 
 	while (qdf_list_remove_front(&vdev_priv->ppdu_stats_q, &node)
 	       == QDF_STATUS_SUCCESS) {
@@ -1200,7 +1247,7 @@ QDF_STATUS pkt_capture_set_filter(struct pkt_capture_frame_filter frame_filter,
 	ol_txrx_soc_handle soc;
 	QDF_STATUS status;
 	enum pkt_capture_config config = 0;
-	bool check_enable_beacon = 0, send_bcn = 0;
+	bool send_bcn = 0;
 	struct vdev_mlme_obj *vdev_mlme;
 	uint32_t bcn_interval, nth_beacon_value;
 
@@ -1273,22 +1320,25 @@ QDF_STATUS pkt_capture_set_filter(struct pkt_capture_frame_filter frame_filter,
 	if (vdev_priv->frame_filter.mgmt_rx_frame_filter &
 	    PKT_CAPTURE_MGMT_FRAME_TYPE_ALL) {
 		mode |= PACKET_CAPTURE_MODE_MGMT_ONLY;
-		config |= PACKET_CAPTURE_CONFIG_BEACON_ENABLE;
+		vdev_priv->frame_filter.mgmt_rx_frame_filter |=
+					PKT_CAPTURE_MGMT_CONNECT_BEACON;
+		vdev_priv->frame_filter.mgmt_rx_frame_filter |=
+					PKT_CAPTURE_MGMT_CONNECT_SCAN_BEACON;
+		if (!send_bcn)
+			config |= PACKET_CAPTURE_CONFIG_BEACON_ENABLE;
 		config |= PACKET_CAPTURE_CONFIG_OFF_CHANNEL_BEACON_ENABLE;
 	} else {
 		if (vdev_priv->frame_filter.mgmt_rx_frame_filter &
 		    PKT_CAPTURE_MGMT_CONNECT_NO_BEACON) {
 			mode |= PACKET_CAPTURE_MODE_MGMT_ONLY;
 			config |= PACKET_CAPTURE_CONFIG_NO_BEACON_ENABLE;
-		} else {
-			check_enable_beacon = 1;
 		}
-	}
 
-	if (check_enable_beacon) {
 		if (vdev_priv->frame_filter.mgmt_rx_frame_filter &
-		    PKT_CAPTURE_MGMT_CONNECT_BEACON)
-			config |= PACKET_CAPTURE_CONFIG_BEACON_ENABLE;
+		    PKT_CAPTURE_MGMT_CONNECT_BEACON) {
+			if (!send_bcn)
+				config |= PACKET_CAPTURE_CONFIG_BEACON_ENABLE;
+		}
 
 		if (vdev_priv->frame_filter.mgmt_rx_frame_filter &
 		    PKT_CAPTURE_MGMT_CONNECT_SCAN_BEACON)
@@ -1315,8 +1365,10 @@ QDF_STATUS pkt_capture_set_filter(struct pkt_capture_frame_filter frame_filter,
 	    vdev_priv->frame_filter.ctrl_rx_frame_filter)
 		config |= PACKET_CAPTURE_CONFIG_TRIGGER_ENABLE;
 
-	if (vdev_priv->frame_filter.data_rx_frame_filter &
-	    PKT_CAPTURE_DATA_FRAME_QOS_NULL)
+	if ((vdev_priv->frame_filter.data_tx_frame_filter &
+	    PKT_CAPTURE_DATA_FRAME_TYPE_ALL) ||
+	    (vdev_priv->frame_filter.data_tx_frame_filter &
+	    PKT_CAPTURE_DATA_FRAME_QOS_NULL))
 		config |= PACKET_CAPTURE_CONFIG_QOS_ENABLE;
 
 	if (config != pkt_capture_get_pktcap_config(vdev)) {

@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2013-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -1089,7 +1090,7 @@ QDF_STATUS wma_process_tx_power_limits(WMA_HANDLE handle,
 	int32_t ret = 0;
 	uint32_t txpower_params2g = 0;
 	uint32_t txpower_params5g = 0;
-	struct pdev_params pdevparam;
+	struct pdev_params pdevparam = {};
 
 	if (!wma || !wma->wmi_handle) {
 		wma_err("WMA is closed, can not issue tx power limit");
@@ -1170,20 +1171,28 @@ static void wma_update_beacon_noa_ie(struct beacon_info *bcn,
 			/* TODO: Assuming p2p noa ie is last ie in the beacon */
 			qdf_mem_zero(bcn->noa_ie, (bcn->noa_sub_ie_len +
 						   sizeof(struct p2p_ie)));
-			bcn->len -= (bcn->noa_sub_ie_len +
-				     sizeof(struct p2p_ie));
+			if (bcn->len < (bcn->noa_sub_ie_len +
+					sizeof(struct p2p_ie)))
+				bcn->len = 0;
+			else
+				bcn->len -= (bcn->noa_sub_ie_len +
+					     sizeof(struct p2p_ie));
 			bcn->noa_ie = NULL;
 			bcn->noa_sub_ie_len = 0;
 		}
-		wma_debug("No need to update NoA");
 		return;
 	}
 
 	if (bcn->noa_sub_ie_len && bcn->noa_ie) {
+		if (bcn->len < (bcn->noa_sub_ie_len + sizeof(struct p2p_ie)))
+			bcn->len = 0;
+		else
+			bcn->len -= (bcn->noa_sub_ie_len +
+				     sizeof(struct p2p_ie));
+
 		/* NoA present in previous beacon, update it */
 		wma_debug("NoA present in previous beacon, update the NoA IE, bcn->len %u bcn->noa_sub_ie_len %u",
-			 bcn->len, bcn->noa_sub_ie_len);
-		bcn->len -= (bcn->noa_sub_ie_len + sizeof(struct p2p_ie));
+			   bcn->len, bcn->noa_sub_ie_len);
 		qdf_mem_zero(bcn->noa_ie,
 			     (bcn->noa_sub_ie_len + sizeof(struct p2p_ie)));
 	} else {                /* NoA is not present in previous beacon */
@@ -1191,6 +1200,14 @@ static void wma_update_beacon_noa_ie(struct beacon_info *bcn,
 			 bcn->len);
 		buf = qdf_nbuf_data(bcn->buf);
 		bcn->noa_ie = buf + bcn->len;
+	}
+
+	if (bcn->len + sizeof(struct p2p_ie) + new_noa_sub_ie_len >
+	    SIR_MAX_BEACON_SIZE) {
+		wma_err("exceed max beacon length, bcn->len %d, new_noa_sub_ie_len %d, p2p len %u",
+			bcn->len, new_noa_sub_ie_len,
+			(uint32_t)sizeof(struct p2p_ie));
+		return;
 	}
 
 	bcn->noa_sub_ie_len = new_noa_sub_ie_len;
@@ -1446,7 +1463,7 @@ QDF_STATUS wma_set_idle_ps_config(void *wma_ptr, uint32_t idle_ps)
 {
 	int32_t ret;
 	tp_wma_handle wma = (tp_wma_handle) wma_ptr;
-	struct pdev_params pdevparam;
+	struct pdev_params pdevparam = {};
 
 	wma_debug("WMA Set Idle Ps Config [1:set 0:clear] val %d", idle_ps);
 

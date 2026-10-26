@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2012-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022-2023 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -2248,6 +2249,8 @@ enum qca_wlan_vendor_attr_ll_stats_results_type {
  * @QCA_WLAN_VENDOR_ATTR_LL_STATS_CHANNEL_RX_TIME:  Unsigned int 32bit
  *      value representing total number of msecs the radio is receiving all
  *      802.11 frames intended for this device on this channel.
+ * @QCA_WLAN_VENDOR_ATTR_LL_STATS_CHANNEL_LOAD_PERCENTAGE: u8 value
+ *	representing the channel load percentage. Possible values are 0-100.
  * @QCA_WLAN_VENDOR_ATTR_LL_STATS_AFTER_LAST: After last
  * @QCA_WLAN_VENDOR_ATTR_FEATURE_SET_MAX: Max value
  */
@@ -2355,7 +2358,12 @@ enum qca_wlan_vendor_attr_ll_stats_results {
 
 	QCA_WLAN_VENDOR_ATTR_LL_STATS_CHANNEL_TX_TIME = 84,
 	QCA_WLAN_VENDOR_ATTR_LL_STATS_CHANNEL_RX_TIME = 85,
+	QCA_WLAN_VENDOR_ATTR_LL_STATS_CHANNEL_LOAD_PERCENTAGE = 86,
 
+	/* u8 value representing the time slicing duty cycle percentage.
+	 * Possible values are 0-100.
+	 */
+	QCA_WLAN_VENDOR_ATTR_LL_STATS_IFACE_INFO_TS_DUTY_CYCLE = 87,
 	/* keep last */
 	QCA_WLAN_VENDOR_ATTR_LL_STATS_AFTER_LAST,
 	QCA_WLAN_VENDOR_ATTR_LL_STATS_MAX =
@@ -2843,7 +2851,10 @@ enum qca_vendor_attr_scan_freq_list_scheme {
  *	due to poor RSSI of the connected AP.
  * @QCA_ROAM_TRIGGER_REASON_BETTER_RSSI: Set if the roam has to be triggered
  *	upon finding a BSSID with a better RSSI than the connected BSSID.
- *	Here the RSSI of the current BSSID need not be poor.
+ *	Also, set if the roam has to be triggered due to the high RSSI of the
+ *	current connected AP (better than
+ *	QCA_ATTR_ROAM_CONTROL_CONNECTED_HIGH_RSSI_OFFSET). Here the RSSI of
+ *	the current BSSID need not be poor.
  * @QCA_ROAM_TRIGGER_REASON_PERIODIC: Set if the roam has to be triggered
  *	by triggering a periodic scan to find a better AP to roam.
  * @QCA_ROAM_TRIGGER_REASON_DENSE: Set if the roam has to be triggered
@@ -3237,6 +3248,51 @@ enum qca_vendor_attr_roam_candidate_selection_criteria {
  *	threshold value specified by the
  *	QCA_ATTR_ROAM_CONTROL_CANDIDATE_RSSI_THRESHOLD attribute shall be used.
  *
+ * @QCA_ATTR_ROAM_CONTROL_HO_DELAY_FOR_RX: u16 value in milliseconds.
+ *	Optional parameter. This configuration delays hand-off (in msec) by the
+ *	specified duration to receive pending rx frames from current BSS.
+ *
+ * @QCA_ATTR_ROAM_CONTROL_FULL_SCAN_NO_REUSE_PARTIAL_SCAN_FREQ: Unsigned 8-bit
+ *	value.
+ *	During the roam scan, if there are no desired APs found in the partial
+ *	frequency list, an immediate full scan on all the supported frequencies
+ *	is initiated as a fallback. This flag controls the frequency list
+ *	creation for the full scan on the following lines.
+ *	1 - Full scan to exclude the frequencies that were already scanned by
+ *	    the previous partial scan.
+ *	0 - Full scan to include all the supported frequencies irrespective of
+ *	    the ones part of the earlier partial scan.
+ *	If this flag is not specified, a full scan shall include all the
+ *	supported frequencies irrespective of the ones part of an earlier
+ *	partial scan.
+ *
+ * @QCA_ATTR_ROAM_CONTROL_FULL_SCAN_6GHZ_ONLY_ON_PRIOR_DISCOVERY: Unsigned 8-bit
+ *	value.
+ *	During the roam scan, if there are no desired APs found in the partial
+ *	frequency list, an immediate full scan on all the supported frequencies
+ *	is initiated as a fallback. This full scan would add the 2.4/5/6 GHz
+ *	frequencies, including all PSC frequencies by default. This attribute
+ *	controls the inclusion of the 6 GHz PSC frequencies for the full scan
+ *	as following.
+ *	1 - Full scan to include the supported 6 GHz PSC frequencies only on the
+ *	    prior discovery of any 6 GHz frequency support in the environment.
+ *	    This discovery can happen through a prior RNR, 11k neighbor
+ *	    request, 11v BTM request, host scan, etc.
+ *	0 - Default behavior. Full scan to include all the supported 6 GHz
+ *	    PSC frequencies regardless of whether 6 GHz BSSs have been
+ *	    discovered.
+ *	The default behavior if this flag is not specified is to include all
+ *	the supported 6 GHz PSC frequencies in the roam full scan.
+ *
+ * @QCA_ATTR_ROAM_CONTROL_CONNECTED_HIGH_RSSI_OFFSET: Unsigned 8-bit value.
+ *	This attribute signifies the RSSI offset that is added to low RSSI
+ *	threshold (QCA_ATTR_ROAM_CONTROL_CONNECTED_LOW_RSSI_THRESHOLD) to imply
+ *	high RSSI threshold. STA is expected to trigger roam if the current
+ *	connected AP's RSSI gets above this high RSSI threshold. STA's roam
+ *	attempt on high RSSI threshold aims to find candidates from other
+ *	better Wi-Fi bands. E.g., STA would initially connect to a 2.4 GHz BSSID
+ *	and would migrate to 5/6 GHz when it comes closer to the AP (high RSSI
+ *	for 2.4 GHz BSS).
  */
 enum qca_vendor_attr_roam_control {
 	QCA_ATTR_ROAM_CONTROL_ENABLE = 1,
@@ -3255,6 +3311,10 @@ enum qca_vendor_attr_roam_control {
 	QCA_ATTR_ROAM_CONTROL_CANDIDATE_RSSI_THRESHOLD_2P4GHZ = 14,
 	QCA_ATTR_ROAM_CONTROL_CANDIDATE_RSSI_THRESHOLD_5GHZ = 15,
 	QCA_ATTR_ROAM_CONTROL_CANDIDATE_RSSI_THRESHOLD_6GHZ = 16,
+	QCA_ATTR_ROAM_CONTROL_HO_DELAY_FOR_RX = 25,
+	QCA_ATTR_ROAM_CONTROL_FULL_SCAN_NO_REUSE_PARTIAL_SCAN_FREQ = 26,
+	QCA_ATTR_ROAM_CONTROL_FULL_SCAN_6GHZ_ONLY_ON_PRIOR_DISCOVERY = 27,
+	QCA_ATTR_ROAM_CONTROL_CONNECTED_HIGH_RSSI_OFFSET = 31,
 
 	/* keep last */
 	QCA_ATTR_ROAM_CONTROL_AFTER_LAST,
@@ -4753,6 +4813,57 @@ enum qca_wlan_vendor_attr_config {
 	 * will update the RX NSS based on QCA_WLAN_VENDOR_ATTR_CONFIG_RX_NSS.
 	 */
 	QCA_WLAN_VENDOR_ATTR_CONFIG_RX_NSS = 78,
+
+	/*
+	 * 8-bit unsigned value. This attribute, when set, indicates whether the
+	 * specified interface is the primary STA interface when there are more
+	 * than one STA interfaces concurrently active.
+	 *
+	 * This configuration helps the firmware/hardware to support certain
+	 * features (e.g., roaming) on this primary interface, if the same
+	 * cannot be supported on the concurrent STA interfaces simultaneously.
+	 *
+	 * This configuration is only applicable for a single STA interface on
+	 * a device and gives the priority for it only over other concurrent STA
+	 * interfaces.
+	 *
+	 * If the device is a multi wiphy/soc, this configuration applies to a
+	 * single STA interface across the wiphys.
+	 *
+	 * 1-Enable (is the primary STA), 0-Disable (is not the primary STA)
+	 */
+	QCA_WLAN_VENDOR_ATTR_CONFIG_CONCURRENT_STA_PRIMARY = 79,
+
+	/*
+	 * 8-bit unsigned value. This attribute can be used to configure the
+	 * driver to enable/disable FT-over-DS feature. Possible values for
+	 * this attribute are 1-Enable and 0-Disable.
+	 */
+	QCA_WLAN_VENDOR_ATTR_CONFIG_FT_OVER_DS = 80,
+
+	/*
+	 * 8-bit unsigned value. This attribute can be used to configure the
+	 * firmware to enable/disable ARP/NS offload feature. Possible values
+	 * for this attribute are 0-Disable and 1-Enable.
+	 *
+	 * This attribute is only applicable for STA/P2P-Client interface,
+	 * and is optional, default behavior is APR/NS offload Enable.
+	 *
+	 * This attribute can be set in disconncted and connected state, and
+	 * will restore to default behavior if interface is closed.
+	 */
+	QCA_WLAN_VENDOR_ATTR_CONFIG_ARP_NS_OFFLOAD = 81,
+
+	/* 8-bit unsigned value, whenever wifi calling (wfc) begin or end,
+	 * Userspace sends this information to driver/firmware to configure
+	 * wfc state. Driver/Firmware uses this information to
+	 * optimize power savings, rate adaption, roaming, etc.
+	 *
+	 * 1 - wfc is on.
+	 * 0 - wfc is off.
+	 */
+	QCA_WLAN_VENDOR_ATTR_CONFIG_WFC_STATE = 86,
+
 	/* keep last */
 	QCA_WLAN_VENDOR_ATTR_CONFIG_AFTER_LAST,
 	QCA_WLAN_VENDOR_ATTR_CONFIG_MAX =
@@ -5527,11 +5638,22 @@ enum qca_vendor_attr_tsf_cmd {
  * @QCA_TSF_CAPTURE: Initiate TSF Capture
  * @QCA_TSF_GET: Get TSF capture value
  * @QCA_TSF_SYNC_GET: Initiate TSF capture and return with captured value
+ * @QCA_TSF_AUTO_REPORT_ENABLE: Used in STA mode only. Once set, the target
+ * will automatically send TSF report to the host. To query
+ * QCA_WLAN_VENDOR_ATTR_GET_STA_INFO_UPLINK_DELAY, this operation needs to be
+ * initiated first.
+ * @QCA_TSF_AUTO_REPORT_DISABLE: Used in STA mode only. Once set, the target
+ * will not automatically send TSF report to the host. If
+ * QCA_TSF_AUTO_REPORT_ENABLE is initiated and
+ * QCA_WLAN_VENDOR_ATTR_GET_STA_INFO_UPLINK_DELAY is not queried anymore, this
+ * operation needs to be initiated.
  */
 enum qca_tsf_cmd {
 	QCA_TSF_CAPTURE,
 	QCA_TSF_GET,
 	QCA_TSF_SYNC_GET,
+	QCA_TSF_AUTO_REPORT_ENABLE,
+	QCA_TSF_AUTO_REPORT_DISABLE,
 };
 
 /**
@@ -8425,6 +8547,14 @@ enum qca_wlan_vendor_attr_wifi_test_config {
 	 */
 	QCA_WLAN_VENDOR_ATTR_WIFI_TEST_CONFIG_6GHZ_SECURITY_TEST_MODE = 51,
 
+	/* 8-bit unsigned value to configure the driver to transmit data with
+	 * ER SU PPDU type.
+	 *
+	 * 0 - Default behavior, 1 - Enable ER SU PPDU type TX.
+	 * This attribute is used for testing purposes.
+	 */
+	QCA_WLAN_VENDOR_ATTR_WIFI_TEST_CONFIG_ER_SU_PPDU_TYPE = 52,
+
 	/* keep last */
 	QCA_WLAN_VENDOR_ATTR_WIFI_TEST_CONFIG_AFTER_LAST,
 	QCA_WLAN_VENDOR_ATTR_WIFI_TEST_CONFIG_MAX =
@@ -10440,6 +10570,11 @@ enum qca_vendor_wlan_sta_guard_interval {
  * failed roam invoke. Different roam invoke failure reason codes
  * are specified in enum qca_vendor_roam_invoke_fail_reasons. This can be
  * queried either in connected state or disconnected state.
+ *
+ * @QCA_WLAN_VENDOR_ATTR_GET_STA_INFO_UPLINK_DELAY: u32, used in STA mode only.
+ * This represents the average congestion duration of uplink frames in MAC
+ * queue in unit of ms. This can be queried either in connected state or
+ * disconnected state.
  */
 enum qca_wlan_vendor_attr_get_sta_info {
 	QCA_WLAN_VENDOR_ATTR_GET_STA_INFO_INVALID = 0,
@@ -10489,6 +10624,7 @@ enum qca_wlan_vendor_attr_get_sta_info {
 	QCA_WLAN_VENDOR_ATTR_GET_STA_INFO_ROAM_TRIGGER_REASON = 47,
 	QCA_WLAN_VENDOR_ATTR_GET_STA_INFO_ROAM_FAIL_REASON = 48,
 	QCA_WLAN_VENDOR_ATTR_GET_STA_INFO_ROAM_INVOKE_FAIL_REASON = 49,
+	QCA_WLAN_VENDOR_ATTR_GET_STA_INFO_UPLINK_DELAY = 50,
 
 	/* keep last */
 	QCA_WLAN_VENDOR_ATTR_GET_STA_INFO_AFTER_LAST,
@@ -10889,6 +11025,58 @@ enum qca_wlan_vendor_oci_override_frame_type {
 	QCA_WLAN_VENDOR_OCI_OVERRIDE_FRAME_SA_QUERY_RESP = 2,
 	QCA_WLAN_VENDOR_OCI_OVERRIDE_FRAME_FT_REASSOC_REQ = 3,
 	QCA_WLAN_VENDOR_OCI_OVERRIDE_FRAME_FILS_REASSOC_REQ = 4,
+};
+
+/**
+ * enum qca_wlan_concurrent_sta_policy_config - Concurrent STA policies
+ *
+ * @QCA_WLAN_CONCURRENT_STA_POLICY_PREFER_PRIMARY: Preference to the primary
+ * STA interface has to be given while selecting the connection policies
+ * (e.g., BSSID, band, TX/RX chains, etc.) for the subsequent STA interface.
+ * An interface is set as primary through the attribute
+ * QCA_WLAN_VENDOR_ATTR_CONFIG_CONCURRENT_STA_PRIMARY. This policy is not
+ * applicable if the primary interface has not been set earlier.
+ *
+ * The intention is not to downgrade the primary STA performance, such as:
+ * - Do not reduce the number of TX/RX chains of primary connection.
+ * - Do not optimize DBS vs. MCC/SCC, if DBS ends up reducing the number of
+ *   chains.
+ * - If using MCC, should set the MCC duty cycle of the primary connection to
+ *   be higher than the secondary connection.
+ *
+ * @QCA_WLAN_CONCURRENT_STA_POLICY_UNBIASED: The connection policies for the
+ * subsequent STA connection shall be chosen to balance with the existing
+ * concurrent STA's performance.
+ * Such as
+ * - Can choose MCC or DBS mode depending on the MCC efficiency and hardware
+ *   capability.
+ * - If using MCC, set the MCC duty cycle of the primary connection to be equal
+ *   to the secondary.
+ * - Prefer BSSID candidates which will help provide the best "overall"
+ *   performance for all the STA connections.
+ */
+enum qca_wlan_concurrent_sta_policy_config {
+	QCA_WLAN_CONCURRENT_STA_POLICY_PREFER_PRIMARY = 0,
+	QCA_WLAN_CONCURRENT_STA_POLICY_UNBIASED = 1,
+};
+
+/**
+ * enum qca_wlan_vendor_attr_concurrent_sta_policy - Defines attributes
+ * used by QCA_NL80211_VENDOR_SUBCMD_CONCURRENT_MULTI_STA_POLICY vendor command.
+ *
+ * @QCA_WLAN_VENDOR_ATTR_CONCURRENT_STA_POLICY_CONFIG:
+ * u8 attribute. Configures the concurrent STA policy configuration.
+ * Possible values are defined in enum qca_wlan_concurrent_sta_policy_config.
+ */
+enum qca_wlan_vendor_attr_concurrent_sta_policy {
+	QCA_WLAN_VENDOR_ATTR_CONCURRENT_STA_POLICY_INVALID = 0,
+	QCA_WLAN_VENDOR_ATTR_CONCURRENT_STA_POLICY_CONFIG = 1,
+
+	/* keep last */
+	QCA_WLAN_VENDOR_ATTR_CONCURRENT_STA_POLICY_AFTER_LAST,
+	QCA_WLAN_VENDOR_ATTR_CONCURRENT_STA_POLICY_MAX =
+	QCA_WLAN_VENDOR_ATTR_CONCURRENT_STA_POLICY_AFTER_LAST - 1,
+
 };
 
 /**

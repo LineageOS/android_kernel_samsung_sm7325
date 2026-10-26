@@ -1,6 +1,6 @@
 /*
  * Copyright (c) 2012-2020 The Linux Foundation. All rights reserved.
- * Copyright (c) 2021 Qualcomm Innovation Center, Inc. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -61,6 +61,7 @@
 #include <wlan_reg_ucfg_api.h>
 #include "wlan_lmac_if_def.h"
 #include "wlan_reg_services_api.h"
+#include <wlan_crypto_global_def.h>
 
 /* SME REQ processing function templates */
 static bool __lim_process_sme_sys_ready_ind(struct mac_context *, uint32_t *);
@@ -1198,6 +1199,140 @@ lim_get_vdev_rmf_capable(struct mac_context *mac, struct pe_session *session)
 }
 #endif
 
+/*
+ * lim_rebuild_rsnxe_cap() - Rebuild the RSNXE CAP for STA
+ *
+ * @rsnx_ie: RSNX IE
+ * @length: length of extended RSN cap field
+ *
+ * This API is used to truncate/rebuild the RSNXE based on the length
+ * provided. This length marks the length of the extended RSN cap field.
+ *
+ * Return: Newly constructed RSNX IE
+ */
+static inline uint8_t *lim_rebuild_rsnxe_cap(uint8_t *rsnx_ie, uint8_t length)
+{
+	const uint8_t *rsnxe_cap;
+	uint8_t cap_len;
+	uint8_t *new_rsnxe = NULL;
+
+	if (length < SIR_MAC_RSNX_CAP_MIN_LEN ||
+	    length > SIR_MAC_RSNX_CAP_MAX_LEN) {
+		pe_err("Invalid length %d", length);
+		return NULL;
+	}
+
+	rsnxe_cap = wlan_crypto_parse_rsnxe_ie(rsnx_ie, &cap_len);
+	if (!rsnxe_cap)
+		return NULL;
+
+	new_rsnxe = qdf_mem_malloc(length + 2);
+	if (!new_rsnxe)
+		return NULL;
+
+	new_rsnxe[0] = WLAN_ELEMID_RSNXE;
+	new_rsnxe[1] = length;
+	qdf_mem_copy(&new_rsnxe[2], rsnxe_cap, length);
+
+	/* Now update the new field length in octet 0 for the new length*/
+	new_rsnxe[2] = (new_rsnxe[2] & 0xF0) | (length - 1);
+
+	pe_debug("New RSNXE length %d", length);
+	QDF_TRACE_HEX_DUMP(QDF_MODULE_ID_PE, QDF_TRACE_LEVEL_DEBUG,
+			   new_rsnxe, length + 2);
+	return new_rsnxe;
+}
+
+static inline QDF_STATUS
+lim_strip_rsnx_ie(struct mac_context *mac_ctx,
+		  struct pe_session *session)
+{
+	int32_t akm;
+	uint8_t len = 0;
+	uint8_t *rsnxe = NULL, *new_rsnxe = NULL;
+	QDF_STATUS status = QDF_STATUS_SUCCESS;
+	uint8_t *add_ie = NULL;
+	uint16_t add_ie_len;
+
+	akm = wlan_crypto_get_param(session->vdev, WLAN_CRYPTO_PARAM_KEY_MGMT);
+	if (akm == -1 ||
+	    !(WLAN_CRYPTO_IS_WPA_WPA2(akm) || WLAN_CRYPTO_IS_WPA3(akm)))
+		return status;
+
+	add_ie = session->lim_join_req->addIEAssoc.addIEdata;
+	add_ie_len = session->lim_join_req->addIEAssoc.length;
+
+	if (!wlan_get_ie_ptr_from_eid(WLAN_ELEMID_RSNXE, add_ie, add_ie_len))
+		return status;
+
+	/*
+	 * Userspace may send RSNXE also in connect request irrespective
+	 * of the connecting AP capabilities. This allows the driver to chose
+	 * best candidate based on score. But the chosen candidate may
+	 * not support the RSNXE feature and may not advertise RSNXE
+	 * in beacon/probe response. Station is not supposed to include
+	 * the RSNX IE in assoc request in such cases as legacy APs
+	 * may misbahave due to the new IE. It's observed that few
+	 * legacy APs which don't support the RSNXE reject the
+	 * connection at EAPOL stage.
+	 *
+	 */
+	rsnxe = qdf_mem_malloc(WLAN_MAX_IE_LEN + 2);
+	if (!rsnxe)
+		return QDF_STATUS_E_FAILURE;
+
+	lim_strip_ie(mac_ctx, add_ie, &add_ie_len, WLAN_ELEMID_RSNXE,
+		     ONE_BYTE, NULL, 0, rsnxe, WLAN_MAX_IE_LEN);
+
+	session->lim_join_req->addIEAssoc.length = add_ie_len;
+
+	if (!rsnxe[0])
+		goto end;
+
+	if (WLAN_CRYPTO_IS_WPA_WPA2(akm)) {
+		mlme_debug("Strip RSNXE as it is not supported by AP");
+		goto end;
+	}
+
+	if (WLAN_CRYPTO_IS_WPA3(akm)) {
+		len = 1;
+		goto rebuild_rsnxe;
+	}
+
+	pe_err("Error in handling RSNXE. RSNXE length : %d", rsnxe[1]);
+	status = QDF_STATUS_E_FAILURE;
+	goto end;
+
+rebuild_rsnxe:
+	/* Build the new RSNXE */
+	new_rsnxe = lim_rebuild_rsnxe_cap(rsnxe, len);
+	if (!new_rsnxe) {
+		status = QDF_STATUS_E_FAILURE;
+		goto end;
+	} else if (!new_rsnxe[1]) {
+		qdf_mem_free(new_rsnxe);
+		status = QDF_STATUS_E_FAILURE;
+		goto end;
+	}
+
+	/* Append the new RSNXE to the assoc ie */
+	if (add_ie_len + new_rsnxe[1] >= SIR_MAC_MAX_ADD_IE_LENGTH) {
+		pe_err("Cannot accomodate the new RSNX IE");
+		status = QDF_STATUS_E_FAILURE;
+		qdf_mem_free(new_rsnxe);
+		goto end;
+	}
+
+	qdf_mem_copy(&add_ie[add_ie_len], new_rsnxe, new_rsnxe[1] + 2);
+	add_ie_len += new_rsnxe[1] + 2;
+	session->lim_join_req->addIEAssoc.length = add_ie_len;
+	qdf_mem_free(new_rsnxe);
+
+end:
+	qdf_mem_free(rsnxe);
+	return status;
+}
+
 /**
  * __lim_process_sme_join_req() - process SME_JOIN_REQ message
  * @mac_ctx: Pointer to Global MAC structure
@@ -1222,7 +1357,7 @@ __lim_process_sme_join_req(struct mac_context *mac_ctx, void *msg_buf)
 	uint8_t vdev_id = 0;
 	int8_t local_power_constraint = 0;
 	struct vdev_mlme_obj *mlme_obj;
-	bool is_pwr_constraint;
+	bool is_pwr_constraint = false;
 	uint16_t ie_len;
 	const uint8_t *vendor_ie;
 	struct bss_description *bss_desc;
@@ -1599,6 +1734,13 @@ __lim_process_sme_join_req(struct mac_context *mac_ctx, void *msg_buf)
 				ret_code = eSIR_SME_INVALID_PARAMETERS;
 				goto end;
 			}
+
+			status = lim_strip_rsnx_ie(mac_ctx, session);
+			if (QDF_IS_STATUS_ERROR(status)) {
+				pe_err("Error in parsing RSNX IE");
+				ret_code = eSIR_SME_INVALID_PARAMETERS;
+				goto end;
+			}
 		}
 
 		mlme_obj = wlan_vdev_mlme_get_cmpt_obj(session->vdev);
@@ -1613,6 +1755,11 @@ __lim_process_sme_join_req(struct mac_context *mac_ctx, void *msg_buf)
 			&session->limCurrentBssQosCaps,
 			&session->gLimCurrentBssUapsd,
 			&local_power_constraint, session, &is_pwr_constraint);
+
+		mlme_obj->reg_tpc_obj.is_power_constraint_abs =
+							!is_pwr_constraint;
+
+		session->best_6g_power_type = sme_join_req->best_6g_power_type;
 
 		if (wlan_reg_is_ext_tpc_supported(mac_ctx->psoc)) {
 			mlme_obj->reg_tpc_obj.ap_constraint_power =
@@ -1756,6 +1903,8 @@ void lim_parse_tpe_ie(struct mac_context *mac, struct pe_session *session,
 	uint16_t bw_val, ch_width;
 	qdf_freq_t curr_op_freq, curr_freq;
 	enum reg_6g_client_type client_mobility_type;
+	enum reg_6g_ap_type ap_power_type_6g;
+	uint16_t reg_max = 0, psd_power = 0;
 	struct ch_params ch_params = {0};
 	tDot11fIEtransmit_power_env single_tpe;
 	/*
@@ -1831,6 +1980,25 @@ void lim_parse_tpe_ie(struct mac_context *mac, struct pe_session *session,
 
 	curr_op_freq = session->curr_op_freq;
 	bw_val = wlan_reg_get_bw_value(session->ch_width);
+
+	if (psd_set) {
+		if (wlan_reg_is_6ghz_chan_freq(curr_op_freq)) {
+			ap_power_type_6g = session->best_6g_power_type;
+
+			wlan_reg_get_client_power_for_connecting_ap(
+						mac->pdev, ap_power_type_6g,
+						curr_op_freq, true, &reg_max, &psd_power);
+
+			/* If reg rules don't support psd power, ignore PSD
+			 * TPE IE
+			 */
+			if (!psd_power) {
+				pe_debug_rl("reg rule doesn't support psd for %d ap type %d",
+					    curr_op_freq, ap_power_type_6g);
+				psd_set = false;
+			}
+		}
+	}
 
 	if (non_psd_set && !psd_set) {
 		single_tpe = tpe_ies[non_psd_index];
@@ -1912,6 +2080,9 @@ void lim_parse_tpe_ie(struct mac_context *mac, struct pe_session *session,
 		single_tpe = tpe_ies[non_psd_index];
 		vdev_mlme->reg_tpc_obj.eirp_power =
 			single_tpe.tx_power[single_tpe.max_tx_pwr_count];
+		pe_debug("eirp_power %d", vdev_mlme->reg_tpc_obj.eirp_power);
+		if (!psd_set)
+			vdev_mlme->reg_tpc_obj.is_psd_power = false;
 	}
 }
 
@@ -2016,10 +2187,7 @@ uint8_t lim_get_max_tx_power(struct mac_context *mac,
 }
 
 void lim_calculate_tpc(struct mac_context *mac,
-		       struct pe_session *session,
-		       bool is_pwr_constraint_absolute,
-		       uint8_t ap_pwr_type,
-		       bool ctry_code_match)
+		       struct pe_session *session)
 {
 	bool is_psd_power = false;
 	bool is_tpe_present = false, is_6ghz_freq = false;
@@ -2031,7 +2199,7 @@ void lim_calculate_tpc(struct mac_context *mac,
 	qdf_freq_t oper_freq, start_freq = 0;
 	struct ch_params ch_params;
 	struct vdev_mlme_obj *mlme_obj;
-	uint8_t tpe_power;
+	int8_t tpe_power;
 	bool skip_tpe = false;
 
 	mlme_obj = wlan_vdev_mlme_get_cmpt_obj(session->vdev);
@@ -2058,38 +2226,42 @@ void lim_calculate_tpc(struct mac_context *mac,
 		skip_tpe = wlan_mlme_skip_tpe(mac->psoc);
 	} else {
 		is_6ghz_freq = true;
-		is_psd_power = wlan_reg_is_6g_psd_power(mac->pdev);
-		/* Power mode calculation for 6G*/
-		ap_power_type_6g = session->ap_power_type;
-		if (LIM_IS_STA_ROLE(session)) {
-			if (!session->lim_join_req) {
-				if (!ctry_code_match)
-					ap_power_type_6g = ap_pwr_type;
-			} else {
-				if (!session->lim_join_req->same_ctry_code)
-					ap_power_type_6g =
-					session->lim_join_req->ap_power_type_6g;
-			}
-		}
+		if (LIM_IS_STA_ROLE(session))
+			ap_power_type_6g = session->best_6g_power_type;
 	}
 
 	if (mlme_obj->reg_tpc_obj.num_pwr_levels) {
 		is_tpe_present = true;
 		num_pwr_levels = mlme_obj->reg_tpc_obj.num_pwr_levels;
+		is_psd_power = mlme_obj->reg_tpc_obj.is_psd_power;
 	} else {
 		num_pwr_levels = lim_get_num_pwr_levels(is_psd_power,
 							session->ch_width);
 	}
 
+	if (num_pwr_levels > MAX_NUM_PWR_LEVELS) {
+		pe_debug("reset num_pwr_levels %d to MAX_NUM_PWR_LEVELS %d",
+			 num_pwr_levels, MAX_NUM_PWR_LEVELS);
+		num_pwr_levels = MAX_NUM_PWR_LEVELS;
+	}
+
 	ch_params.ch_width = CH_WIDTH_20MHZ;
 
-	for (i = 0; i < num_pwr_levels; i++) {
+	for (i = 0;
+		i < num_pwr_levels && (ch_params.ch_width != CH_WIDTH_INVALID);
+		i++) {
 		if (is_tpe_present) {
 			if (is_6ghz_freq) {
-				wlan_reg_get_client_power_for_connecting_ap(
-				mac->pdev, ap_power_type_6g,
-				mlme_obj->reg_tpc_obj.frequency[i],
-				&is_psd_power, &reg_max, &psd_power);
+				if (is_psd_power) {
+					wlan_reg_get_client_power_for_connecting_ap(
+						mac->pdev, ap_power_type_6g,
+						mlme_obj->reg_tpc_obj.frequency[i],
+						is_psd_power, &reg_max, &psd_power);
+				} else {
+					wlan_reg_get_client_power_for_connecting_ap(
+						mac->pdev, ap_power_type_6g, oper_freq,
+						is_psd_power, &reg_max, &psd_power);
+				}
 			}
 		} else {
 			/* center frequency calculation */
@@ -2101,18 +2273,18 @@ void lim_calculate_tpc(struct mac_context *mac,
 					mac->pdev, oper_freq, 0, &ch_params);
 				mlme_obj->reg_tpc_obj.frequency[i] =
 					ch_params.mhz_freq_seg0;
-				ch_params.ch_width =
-					get_next_higher_bw[ch_params.ch_width];
+				if (ch_params.ch_width != CH_WIDTH_INVALID)
+					ch_params.ch_width =
+						get_next_higher_bw[ch_params.ch_width];
 			}
 			if (is_6ghz_freq) {
 				if (LIM_IS_STA_ROLE(session)) {
 					wlan_reg_get_client_power_for_connecting_ap
 					(mac->pdev, ap_power_type_6g,
 					 mlme_obj->reg_tpc_obj.frequency[i],
-					 &is_psd_power, &reg_max, &psd_power);
+					 is_psd_power, &reg_max, &psd_power);
 				} else {
-					ap_power_type_6g =
-						wlan_reg_get_cur_6g_ap_pwr_type(
+					wlan_reg_get_cur_6g_ap_pwr_type(
 							mac->pdev,
 							&ap_power_type_6g);
 					wlan_reg_get_6g_chan_ap_power(
@@ -2132,8 +2304,11 @@ void lim_calculate_tpc(struct mac_context *mac,
 		if (mlme_obj->reg_tpc_obj.ap_constraint_power) {
 			local_constraint =
 				mlme_obj->reg_tpc_obj.ap_constraint_power;
-			reg_max = mlme_obj->reg_tpc_obj.reg_max[i];
-			if (is_pwr_constraint_absolute)
+			pe_debug("local constraint: %d"
+				 "power constraint absolute: %d",
+				 local_constraint,
+				 mlme_obj->reg_tpc_obj.is_power_constraint_abs);
+			if (mlme_obj->reg_tpc_obj.is_power_constraint_abs)
 				max_tx_power = QDF_MIN(reg_max,
 						       local_constraint);
 			else
@@ -2145,7 +2320,14 @@ void lim_calculate_tpc(struct mac_context *mac,
 				tpe_power =  mlme_obj->reg_tpc_obj.eirp_power;
 			else
 				tpe_power = mlme_obj->reg_tpc_obj.tpe[i];
-			max_tx_power = QDF_MIN(max_tx_power, (int8_t)tpe_power);
+			/**
+			 * AP advertises TPE IE tx power as 8-bit unsigned int.
+			 * STA needs to convert it into an 8-bit 2s complement
+			 * signed integer in the range –64 dBm to 63 dBm with a
+			 * 0.5 dB step
+			 */
+			tpe_power /= 2;
+			max_tx_power = QDF_MIN(max_tx_power, tpe_power);
 			pe_debug("TPE: %d", tpe_power);
 		}
 
@@ -2168,12 +2350,12 @@ void lim_calculate_tpc(struct mac_context *mac,
 	}
 
 	mlme_obj->reg_tpc_obj.num_pwr_levels = num_pwr_levels;
-	mlme_obj->reg_tpc_obj.is_psd_power = is_psd_power;
 	mlme_obj->reg_tpc_obj.eirp_power = reg_max;
 	mlme_obj->reg_tpc_obj.power_type_6g = ap_power_type_6g;
 
-	pe_debug("num_pwr_levels: %d, is_psd_power: %d, total eirp_power: %d, ap_pwr_type: %d",
-		 num_pwr_levels, is_psd_power, reg_max, ap_power_type_6g);
+	pe_debug("num_pwr_levels: %d, is_psd_power: %d, total eirp_power: %d, ap_pwr_type: %d tx_pwrlimit: %d",
+		 num_pwr_levels, is_psd_power, reg_max, ap_power_type_6g,
+		 mlme_obj->mgmt.generic.tx_pwrlimit);
 }
 
 /**
@@ -3544,7 +3726,7 @@ __lim_process_sme_addts_req(struct mac_context *mac, uint32_t *msg_buf)
 	/* ship out the message now */
 	lim_send_addts_req_action_frame(mac, peerMac, &pSirAddts->req,
 					pe_session);
-	pe_err("Sent ADDTS request");
+	pe_debug("Sent ADDTS request");
 	/* start a timer to wait for the response */
 	if (pSirAddts->timeout)
 		timeout = pSirAddts->timeout;
@@ -6337,6 +6519,9 @@ static void lim_process_set_ie_req(struct mac_context *mac_ctx, uint32_t *msg_bu
 	p_ext_cap = (struct s_ext_cap *)extra_ext_cap.bytes;
 	if (p_ext_cap->interworking_service)
 		p_ext_cap->qos_map = 1;
+
+	if (wma_is_mbssid_enabled())
+		p_ext_cap->multi_bssid = 1;
 
 	extra_ext_cap.num_bytes = lim_compute_ext_cap_ie_length(&extra_ext_cap);
 

@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2012-2020 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2022,2024 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -481,6 +482,9 @@ struct sme_ready_req {
 					uint16_t deauth_disassoc_frame_len,
 					uint16_t reason_code);
 	csr_roam_pmkid_req_fn_t csr_roam_pmkid_req_cb;
+	QDF_STATUS (*csr_roam_candidate_event_cb)(struct mac_context *mac,
+						  uint8_t *frame,
+						  uint32_t len);
 };
 
 /**
@@ -1044,9 +1048,8 @@ struct join_req {
 	struct supported_channels supportedChannels;
 	bool enable_bcast_probe_rsp;
 	bool sae_pmk_cached;
-	bool same_ctry_code;  /* If AP Country IE has same country code as */
 	/* STA programmed country */
-	uint8_t ap_power_type_6g;  /* AP power type for 6G (LPI, SP, or VLP) */
+	uint8_t best_6g_power_type;  /* AP power type for 6G (LPI, SP, or VLP) */
 	/* Pls make this as last variable in struct */
 	bool force_24ghz_in_ht20;
 	bool force_rsne_override;
@@ -2928,6 +2931,18 @@ struct roam_offload_synch_ind {
 	enum wlan_phymode phy_mode; /*phy mode sent by fw */
 };
 
+/*
+ * struct roam_scan_candidate_frame Roam candidate scan entry
+ * vdev_id : vdev id
+ * frame_len : Length of the beacon/probe rsp frame
+ * frame : Pointer to the frame
+ */
+struct roam_scan_candidate_frame {
+	uint8_t vdev_id;
+	uint32_t frame_length;
+	uint8_t *frame;
+};
+
 #ifdef WLAN_FEATURE_ROAM_OFFLOAD
 struct handoff_failure_ind {
 	uint8_t vdev_id;
@@ -3480,6 +3495,7 @@ struct wifi_interface_info {
 	uint8_t apCountryStr[REG_ALPHA2_LEN + 1];
 	/* country string for this association */
 	uint8_t countryStr[REG_ALPHA2_LEN + 1];
+	uint8_t time_slice_duty_cycle;
 };
 
 /**
@@ -4412,6 +4428,8 @@ struct sir_sme_ext_cng_chan_ind {
  * @soc_timer_high: high 32bits of synced SOC timer value
  * @global_tsf_low: low 32bits of tsf64
  * @global_tsf_high: high 32bits of tsf64
+ * @mac_id: MAC identifier
+ * @mac_id_valid: Indicate if mac_id is valid or not
  *
  * driver use this struct to store the tsf info
  */
@@ -4423,6 +4441,10 @@ struct stsf {
 	uint32_t soc_timer_high;
 	uint32_t global_tsf_low;
 	uint32_t global_tsf_high;
+#ifdef WLAN_FEATURE_TSF_UPLINK_DELAY
+	uint32_t mac_id;
+	uint32_t mac_id_valid;
+#endif
 };
 
 #define SIR_BCN_FLT_MAX_ELEMS_IE_LIST 8
@@ -5667,6 +5689,12 @@ struct sir_sae_info {
  * @vdev_id: vdev id
  * @sae_status: SAE status, 0: Success, Non-zero: Failure.
  * @peer_mac_addr: peer MAC address
+ * @result_code: This carries the reason of the SAE auth failure.
+ *               Currently, SAE authentication failure may happen due to
+ *               1. Authentication failure detected as part of SAE auth frame
+ *                  exchanges and validation.
+ *               2. Deauth received from AP while SAE authentication is in
+ *                  progress.
  */
 struct sir_sae_msg {
 	uint16_t message_type;
@@ -5674,6 +5702,7 @@ struct sir_sae_msg {
 	uint16_t vdev_id;
 	uint8_t sae_status;
 	tSirMacAddr peer_mac_addr;
+	tSirResultCodes result_code;
 };
 
 #ifdef WLAN_FEATURE_MOTION_DETECTION

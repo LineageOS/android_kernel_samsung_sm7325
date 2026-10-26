@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2013-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) 2021-2025 Qualcomm Innovation Center, Inc. All rights reserved.
  *
  * Permission to use, copy, modify, and/or distribute this software for
  * any purpose with or without fee is hereby granted, provided that the
@@ -707,7 +708,6 @@ int wma_stats_ext_event_handler(void *handle, uint8_t *event_buf,
 	}
 
 	stats_ext_info = param_buf->fixed_param;
-	buf_ptr = (uint8_t *)stats_ext_info;
 
 	alloc_len = sizeof(tSirStatsExtEvent);
 	alloc_len += stats_ext_info->data_len;
@@ -724,7 +724,7 @@ int wma_stats_ext_event_handler(void *handle, uint8_t *event_buf,
 	if (!stats_ext_event)
 		return -ENOMEM;
 
-	buf_ptr += sizeof(wmi_stats_ext_event_fixed_param) + WMI_TLV_HDR_SIZE;
+	buf_ptr = (uint8_t *)param_buf->data;
 
 	stats_ext_event->vdev_id = stats_ext_info->vdev_id;
 	stats_ext_event->event_data_len = stats_ext_info->data_len;
@@ -774,7 +774,6 @@ int wma_stats_ext_event_handler(void *handle, uint8_t *event_buf,
 	}
 
 	stats_ext_info = param_buf->fixed_param;
-	buf_ptr = (uint8_t *)stats_ext_info;
 
 	alloc_len = sizeof(tSirStatsExtEvent);
 	alloc_len += stats_ext_info->data_len;
@@ -790,7 +789,7 @@ int wma_stats_ext_event_handler(void *handle, uint8_t *event_buf,
 	if (!stats_ext_event)
 		return -ENOMEM;
 
-	buf_ptr += sizeof(wmi_stats_ext_event_fixed_param) + WMI_TLV_HDR_SIZE;
+	buf_ptr = (uint8_t *)param_buf->data;
 
 	stats_ext_event->vdev_id = stats_ext_info->vdev_id;
 	stats_ext_event->event_data_len = stats_ext_info->data_len;
@@ -831,7 +830,6 @@ int wma_profile_data_report_event_handler(void *handle, uint8_t *event_buf,
 	wmi_wlan_profile_t *profile_data;
 	uint32_t i = 0;
 	uint32_t entries;
-	uint8_t *buf_ptr;
 	char temp_str[150];
 
 	param_buf = (WMI_WLAN_PROFILE_DATA_EVENTID_param_tlvs *) event_buf;
@@ -839,12 +837,9 @@ int wma_profile_data_report_event_handler(void *handle, uint8_t *event_buf,
 		wma_err("Invalid profile data event buf");
 		return -EINVAL;
 	}
-	profile_ctx = param_buf->profile_ctx;
-	buf_ptr = (uint8_t *)profile_ctx;
-	buf_ptr = buf_ptr + sizeof(wmi_wlan_profile_ctx_t) + WMI_TLV_HDR_SIZE;
-	profile_data = (wmi_wlan_profile_t *) buf_ptr;
-	entries = profile_ctx->bin_count;
 
+	profile_ctx = param_buf->profile_ctx;
+	entries = profile_ctx->bin_count;
 	if (entries > param_buf->num_profile_data) {
 		wma_err("FW bin count %d more than data %d in TLV hdr",
 			 entries,
@@ -873,6 +868,7 @@ int wma_profile_data_report_event_handler(void *handle, uint8_t *event_buf,
 	QDF_TRACE(QDF_MODULE_ID_WMA, QDF_TRACE_LEVEL_ERROR,
 		  "Profile ID: Count: TOT: Min: Max: hist_intvl: hist[0]: hist[1]:hist[2]");
 
+	profile_data = param_buf->profile_data;
 	for (i = 0; i < entries; i++) {
 		if (i == WMI_WLAN_PROFILE_MAX_BIN_CNT)
 			break;
@@ -1149,9 +1145,9 @@ wma_fill_tx_stats(struct sir_wifi_ll_ext_stats *ll_stats,
 	struct sir_wifi_tx *tx_stats;
 	struct sir_wifi_ll_ext_peer_stats *peer_stats;
 	uint32_t *tx_mpdu_aggr, *tx_succ_mcs, *tx_fail_mcs, *tx_delay;
-	uint32_t len, dst_len, param_len, tx_mpdu_aggr_array_len,
-		 tx_succ_mcs_array_len, tx_fail_mcs_array_len,
-		 tx_delay_array_len;
+	uint32_t len, dst_len, param_len, num_entries,
+		 tx_mpdu_aggr_array_len, tx_succ_mcs_array_len,
+		 tx_fail_mcs_array_len, tx_delay_array_len;
 
 	result = *buf;
 	dst_len = *buf_length;
@@ -1227,6 +1223,12 @@ wma_fill_tx_stats(struct sir_wifi_ll_ext_stats *ll_stats,
 	if (!wmi_peer_tx || !wmi_tx || !peer_stats) {
 		wma_err("Invalid arg, peer_tx %pK, wmi_tx %pK stats %pK",
 			 wmi_peer_tx, wmi_tx, peer_stats);
+		return QDF_STATUS_E_FAILURE;
+	}
+
+	num_entries = fix_param->num_peer_ac_tx_stats * WLAN_MAX_AC;
+	if (num_entries > param_buf->num_tx_stats) {
+		wma_err("tx stats invalid arg, %d", num_entries);
 		return QDF_STATUS_E_FAILURE;
 	}
 
@@ -1961,18 +1963,23 @@ static int wma_unified_radio_tx_power_level_stats_event_handler(void *handle,
 		return -EINVAL;
 	}
 
-	if (!rs_results->tx_time_per_power_level) {
-		rs_results->tx_time_per_power_level = qdf_mem_malloc(
-				sizeof(uint32_t) *
-				rs_results->total_num_tx_power_levels);
-		if (!rs_results->tx_time_per_power_level) {
-			/* In error case, atleast send the radio stats without
-			 * tx_power_level stats */
-			rs_results->total_num_tx_power_levels = 0;
-			link_stats_results->nr_received++;
-			goto post_stats;
-		}
+	if (rs_results->tx_time_per_power_level) {
+		qdf_mem_free(rs_results->tx_time_per_power_level);
+		rs_results->tx_time_per_power_level = NULL;
 	}
+
+	rs_results->tx_time_per_power_level =
+		qdf_mem_malloc(sizeof(uint32_t) *
+			       rs_results->total_num_tx_power_levels);
+	if (!rs_results->tx_time_per_power_level) {
+		/* In error case, atleast send the radio stats without
+		 * tx_power_level stats
+		 */
+		rs_results->total_num_tx_power_levels = 0;
+		link_stats_results->nr_received++;
+		goto post_stats;
+	}
+
 	qdf_mem_copy(&rs_results->tx_time_per_power_level[
 					fixed_param->power_level_offset],
 		tx_power_level_values,
@@ -2162,6 +2169,9 @@ static int wma_unified_link_radio_stats_event_handler(void *handle,
 			fixed_param->num_radio);
 		return -EINVAL;
 	}
+	if (wma_handle->link_stats_results &&
+	    !wma_handle->link_stats_results->num_radio)
+		wma_unified_radio_tx_mem_free(wma_handle);
 
 	if (!wma_handle->link_stats_results) {
 		wma_handle->link_stats_results = qdf_mem_malloc(
@@ -2179,7 +2189,6 @@ static int wma_unified_link_radio_stats_event_handler(void *handle,
 		 * events may be spoofed. Drop all of them and report error.
 		 */
 		wma_err("Invalid following WMI_RADIO_LINK_STATS_EVENTID. Discarding this set");
-		wma_unified_radio_tx_mem_free(handle);
 		return -EINVAL;
 	}
 
@@ -2230,10 +2239,8 @@ static int wma_unified_link_radio_stats_event_handler(void *handle,
 		channels_in_this_event = qdf_mem_malloc(
 					radio_stats->num_channels *
 					chan_stats_size);
-		if (!channels_in_this_event) {
-			wma_unified_radio_tx_mem_free(handle);
+		if (!channels_in_this_event)
 			return -ENOMEM;
-		}
 
 		chn_results =
 			(struct wifi_channel_stats *)&channels_in_this_event[0];
@@ -2271,7 +2278,7 @@ static int wma_unified_link_radio_stats_event_handler(void *handle,
 					     channels_in_this_event,
 					     rs_results);
 		if (status) {
-			wma_unified_radio_tx_mem_free(handle);
+			wma_err("Failed to copy channel stats");
 			return status;
 		}
 	}
@@ -2735,6 +2742,8 @@ int wma_unified_link_iface_stats_event_handler(void *handle,
 
 	/* Copy roaming state */
 	iface_stat->info.roaming = link_stats->roam_state;
+	/* Copy time slicing duty cycle */
+	iface_stat->info.time_slice_duty_cycle = 100;
 
 	iface_ac_stats = &iface_stat->ac_stats[0];
 	for (count = 0; count < link_stats->num_ac; count++) {
@@ -3948,8 +3957,6 @@ QDF_STATUS wma_send_vdev_down_to_fw(t_wma_handle *wma, uint8_t vdev_id)
 		return status;
 	}
 
-	wma->interfaces[vdev_id].roaming_in_progress = false;
-
 	status = vdev_mgr_down_send(vdev_mlme);
 
 	return status;
@@ -3990,7 +3997,7 @@ QDF_STATUS wma_set_vc_mode_config(void *wma_handle,
 {
 	int32_t ret;
 	tp_wma_handle wma = (tp_wma_handle)wma_handle;
-	struct pdev_params pdevparam;
+	struct pdev_params pdevparam = {};
 
 	pdevparam.param_id = WMI_PDEV_UPDATE_WDCVS_ALGO;
 	pdevparam.param_value = vc_bitmap;

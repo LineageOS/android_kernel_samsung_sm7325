@@ -1,5 +1,6 @@
 /*
  * Copyright (c) 2017-2021 The Linux Foundation. All rights reserved.
+ * Copyright (c) Qualcomm Technologies, Inc. and/or its subsidiaries.
  *
  *
  * Permission to use, copy, modify, and/or distribute this software for
@@ -86,12 +87,14 @@ QDF_STATUS wlan_reg_get_max_5g_bw_from_regdomain(uint16_t regdmn,
 
 #ifdef CONFIG_REG_CLIENT
 QDF_STATUS
-wlan_reg_get_6g_power_type_for_ctry(uint8_t *ap_ctry, uint8_t *sta_ctry,
-				    enum reg_6g_ap_type *pwr_type_6g,
-				    bool *ctry_code_match)
+wlan_reg_get_best_6g_power_type(struct wlan_objmgr_psoc *psoc,
+				struct wlan_objmgr_pdev *pdev,
+				enum reg_6g_ap_type *pwr_type_6g,
+				enum reg_6g_ap_type ap_pwr_type,
+				uint32_t chan_freq)
 {
-	return reg_get_6g_power_type_for_ctry(ap_ctry, sta_ctry, pwr_type_6g,
-					      ctry_code_match);
+	return reg_get_best_6g_power_type(psoc, pdev, pwr_type_6g,
+					  ap_pwr_type, chan_freq);
 }
 #endif
 
@@ -476,6 +479,16 @@ regulatory_assign_unregister_master_ext_handler(struct wlan_objmgr_psoc *psoc,
 	if (tx_ops->unregister_master_ext_handler)
 		tx_ops->unregister_master_ext_handler(psoc, NULL);
 }
+
+QDF_STATUS wlan_reg_get_6g_ap_master_chan_list(
+					struct wlan_objmgr_pdev *pdev,
+					enum reg_6g_ap_type ap_pwr_type,
+					struct regulatory_channel *chan_list)
+{
+	return  reg_get_6g_ap_master_chan_list(pdev, ap_pwr_type, chan_list);
+}
+
+qdf_export_symbol(wlan_reg_get_6g_ap_master_chan_list);
 #else
 static inline void
 regulatory_assign_register_master_ext_handler(struct wlan_objmgr_psoc *psoc,
@@ -651,6 +664,11 @@ bool wlan_reg_is_us(uint8_t *country)
 bool wlan_reg_is_etsi(uint8_t *country)
 {
 	return reg_is_etsi_alpha2(country);
+}
+
+bool wlan_reg_ctry_support_vlp(uint8_t *country)
+{
+	return reg_ctry_support_vlp(country);
 }
 
 void wlan_reg_register_chan_change_callback(struct wlan_objmgr_psoc *psoc,
@@ -1425,7 +1443,7 @@ QDF_STATUS
 wlan_reg_get_client_power_for_connecting_ap(struct wlan_objmgr_pdev *pdev,
 					    enum reg_6g_ap_type ap_type,
 					    qdf_freq_t chan_freq,
-					    bool *is_psd, uint16_t *tx_power,
+					    bool is_psd, uint16_t *tx_power,
 					    uint16_t *eirp_psd_power)
 {
 	return reg_get_client_power_for_connecting_ap(pdev, ap_type, chan_freq,
