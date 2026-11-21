@@ -1,5 +1,23 @@
 {
-  "comments": [],
+  "comments": [
+    {
+      "unresolved": false,
+      "key": {
+        "uuid": "1c3cbbf6_09c6d220",
+        "filename": "/PATCHSET_LEVEL",
+        "patchSetId": 1
+      },
+      "lineNbr": 0,
+      "author": {
+        "id": 13648
+      },
+      "writtenOn": "2026-11-21T13:36:04Z",
+      "side": 1,
+      "message": "Next time also add the \"Fixes: \u003clink-to-github-issue\u003e\" annotation.",
+      "revId": "d624e827eb3f6cace2f162893bde1a58abb3a340",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71"
+    }
+  ],
   "submitRequirementResults": [
     {
       "submitRequirement": {
